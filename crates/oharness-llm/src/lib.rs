@@ -6,11 +6,17 @@
 
 pub mod chunk;
 pub mod error;
+pub mod layer;
 pub mod llm;
 pub mod stream;
 
 pub use chunk::{BlockStartKind, Chunk};
 pub use error::{LayerError, LlmError};
+pub use layer::{
+    ChunkObserver, ChunkTransformer, FullLayer, InfallibleLlmLayer, LlmExt, LlmLayer, RequestLayer,
+    ResponseLayer, ResponseLayerStreamMode, WithChunkObserver, WithChunkTransformer, WithFullLayer,
+    WithRequestLayer, WithResponseLayer,
+};
 pub use llm::Llm;
 pub use stream::complete_from_stream;
 

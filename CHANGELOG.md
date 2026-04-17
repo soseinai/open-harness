@@ -32,7 +32,22 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
-- **M1b-α**: `AnthropicLlm::stream()` implemented via a hand-rolled Server-Sent
+- **M1b-β**: middleware helper traits + fluent composition in `oharness-llm`.
+  Five helper traits (`RequestLayer`, `ResponseLayer`, `FullLayer`,
+  `ChunkObserver`, `ChunkTransformer`) each get a wrapper type
+  (`WithRequestLayer`, …) that implements `Llm`. `ResponseLayer` streaming
+  behaviour is configurable via `ResponseLayerStreamMode`
+  (`WarnAndSkip` / `Error` / `SilentSkip`). `FullLayer` is intentionally
+  two methods (`around_complete` / `around_stream`) rather than a generic
+  `around<T>` so retry semantics stay explicit per plan §5.5.
+  Bespoke layers implement `LlmLayer<Inner>` (fallible) or
+  `InfallibleLlmLayer<Inner>` (infallible); `LlmExt` adds
+  `with_layer` / `try_with_layer` plus direct convenience methods
+  (`with_request_layer`, `with_response_layer`, `with_full_layer`,
+  `with_chunk_observer`, `with_chunk_transformer`). 15 unit tests cover
+  each role plus a mixed-chain smoke. `tracing` added as a direct
+  dependency of `oharness-llm` for the `WarnAndSkip` log.
+- **Fix**: convert `Content::Text` and `Content::Thinking` from newtype
   Events parser (no new runtime dependency — only `wiremock` added as a
   dev-dep for the fixture-backed integration tests). Anthropic events
   (`message_start`, `content_block_{start,delta,stop}`, `message_delta`,
