@@ -1,0 +1,26 @@
+[package]
+name = "oharness-memory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Pluggable memory/context strategies for open-harness"
+
+[lints]
+workspace = true
+
+[features]
+default = ["passthrough", "truncate", "elide"]
+passthrough = []
+truncate = []
+elide = []
+
+[dependencies]
+oharness-core = { workspace = true }
+oharness-llm = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }

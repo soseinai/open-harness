@@ -1,0 +1,64 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/oharness-core",
+    "crates/oharness-llm",
+    "crates/oharness-providers",
+    "crates/oharness-tools",
+    "crates/oharness-memory",
+    "crates/oharness-trace",
+    "crates/oharness-loop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/aishfenton/open-harness"
+authors = ["open-harness contributors"]
+
+[workspace.lints.rust]
+warnings = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+
+[workspace.dependencies]
+# Internal crates
+oharness-core = { path = "crates/oharness-core", version = "0.1.0" }
+oharness-llm = { path = "crates/oharness-llm", version = "0.1.0" }
+oharness-providers = { path = "crates/oharness-providers", version = "0.1.0" }
+oharness-tools = { path = "crates/oharness-tools", version = "0.1.0" }
+oharness-memory = { path = "crates/oharness-memory", version = "0.1.0" }
+oharness-trace = { path = "crates/oharness-trace", version = "0.1.0" }
+oharness-loop = { path = "crates/oharness-loop", version = "0.1.0" }
+
+# Core
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
+url = { version = "2", features = ["serde"] }
+
+# Async / runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "fs", "io-util", "time", "process"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+async-trait = "0.1"
+futures = "0.3"
+futures-util = "0.3"
+
+# HTTP
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+
+# Logging
+tracing = "0.1"
+
+# Hashing (for payload externalization)
+sha2 = "0.10"
+hex = "0.4"
+
+[profile.release]
+lto = "thin"

@@ -1,0 +1,29 @@
+[package]
+name = "oharness-trace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "EventSink implementations, trajectory writer/reader for open-harness"
+
+[lints]
+workspace = true
+
+[features]
+default = ["file-sink", "jsonl"]
+file-sink = []
+jsonl = []
+
+[dependencies]
+oharness-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
