@@ -15,6 +15,12 @@ workspace = true
 default = ["anthropic"]
 anthropic = ["reqwest"]
 openai = ["reqwest"]
+# OpenAI-compatible deployments. Each pulls in the core `openai` adapter —
+# they're thin factories over `OpenAiLlm` with different base URLs, auth,
+# and provider names.
+openrouter = ["openai"]
+ollama = ["openai"]
+vllm = ["openai"]
 
 [dependencies]
 oharness-core = { workspace = true }

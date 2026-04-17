@@ -42,11 +42,20 @@ const DEFAULT_MODEL: &str = "gpt-4o";
 
 pub struct OpenAiLlm {
     http: reqwest::Client,
-    api_key: String,
+    /// Bearer token, or `None` for deployments that require no auth
+    /// (Ollama / self-hosted vLLM without an auth shim).
+    api_key: Option<String>,
     model: ModelId,
     base_url: String,
     timeout: Duration,
     capabilities: LlmCapabilities,
+    /// Short, user-facing provider name. Defaults to `"openai"`; the
+    /// OpenAI-compatible factories (`OpenRouter`, `Ollama`, `Vllm`) override
+    /// this so trajectory events carry a useful provider label.
+    name: String,
+    /// Extra HTTP headers to attach to every request. OpenRouter uses this
+    /// for `HTTP-Referer` / `X-Title` attribution headers.
+    extra_headers: Vec<(String, String)>,
 }
 
 impl OpenAiLlm {
@@ -58,6 +67,15 @@ impl OpenAiLlm {
     }
 
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        let mut llm = Self::without_auth(model);
+        llm.api_key = Some(api_key.into());
+        llm
+    }
+
+    /// Build an adapter with no bearer-auth header. Intended for local
+    /// deployments (Ollama, self-hosted vLLM) where the server doesn't
+    /// expect an `Authorization` header.
+    pub fn without_auth(model: impl Into<String>) -> Self {
         let http = reqwest::Client::builder()
             .user_agent(concat!("oharness-providers/", env!("CARGO_PKG_VERSION")))
             .build()
@@ -65,7 +83,7 @@ impl OpenAiLlm {
         let model = ModelId::new(model.into());
         Self {
             http,
-            api_key: api_key.into(),
+            api_key: None,
             model,
             base_url: OPENAI_API.to_string(),
             timeout: Duration::from_secs(120),
@@ -83,6 +101,8 @@ impl OpenAiLlm {
                 max_context_tokens: 128_000,
                 max_output_tokens: 4096,
             },
+            name: "openai".to_string(),
+            extra_headers: Vec::new(),
         }
     }
 
@@ -95,12 +115,52 @@ impl OpenAiLlm {
         self.timeout = d;
         self
     }
+
+    /// Override the `name()` advertised to the tracing / event pipeline.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    /// Attach an extra HTTP header that will be sent with every request.
+    /// Chained calls accumulate; duplicate names are not de-duplicated.
+    pub fn with_extra_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.extra_headers.push((name.into(), value.into()));
+        self
+    }
+
+    /// Tweak capabilities in place — the OpenAI-compatible variants use
+    /// this to downgrade defaults that don't apply (e.g. Ollama's smaller
+    /// context window).
+    pub fn with_capabilities(mut self, capabilities: LlmCapabilities) -> Self {
+        self.capabilities = capabilities;
+        self
+    }
+
+    fn build_request(&self, body: &Value, accept_event_stream: bool) -> reqwest::RequestBuilder {
+        let mut req = self
+            .http
+            .post(&self.base_url)
+            .header("content-type", "application/json")
+            .timeout(self.timeout)
+            .json(body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+        if accept_event_stream {
+            req = req.header("accept", "text/event-stream");
+        }
+        for (name, value) in &self.extra_headers {
+            req = req.header(name.as_str(), value.as_str());
+        }
+        req
+    }
 }
 
 #[async_trait]
 impl Llm for OpenAiLlm {
     fn name(&self) -> &str {
-        "openai"
+        &self.name
     }
 
     fn capabilities(&self) -> LlmCapabilities {
@@ -110,12 +170,7 @@ impl Llm for OpenAiLlm {
     async fn complete(&self, req: CompletionRequest) -> Result<CompletionResponse, LlmError> {
         let body = to_wire_request(&self.model, &req, false);
         let resp = self
-            .http
-            .post(&self.base_url)
-            .bearer_auth(&self.api_key)
-            .header("content-type", "application/json")
-            .timeout(self.timeout)
-            .json(&body)
+            .build_request(&body, false)
             .send()
             .await
             .map_err(reqwest_to_llm_err)?;
@@ -134,13 +189,7 @@ impl Llm for OpenAiLlm {
     async fn stream(&self, req: CompletionRequest) -> Result<ChunkStream, LlmError> {
         let body = to_wire_request(&self.model, &req, true);
         let resp = self
-            .http
-            .post(&self.base_url)
-            .bearer_auth(&self.api_key)
-            .header("content-type", "application/json")
-            .header("accept", "text/event-stream")
-            .timeout(self.timeout)
-            .json(&body)
+            .build_request(&body, true)
             .send()
             .await
             .map_err(reqwest_to_llm_err)?;

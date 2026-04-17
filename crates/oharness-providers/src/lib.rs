@@ -10,6 +10,9 @@ pub mod anthropic;
 #[cfg(feature = "openai")]
 pub mod openai;
 
+#[cfg(feature = "openai")]
+pub mod openai_compatible;
+
 pub mod caching;
 
 #[cfg(feature = "anthropic")]
@@ -17,3 +20,10 @@ pub use anthropic::{AnthropicLlm, AnthropicPromptCaching};
 pub use caching::PromptCaching;
 #[cfg(feature = "openai")]
 pub use openai::OpenAiLlm;
+
+#[cfg(feature = "ollama")]
+pub use openai_compatible::Ollama;
+#[cfg(feature = "openrouter")]
+pub use openai_compatible::OpenRouter;
+#[cfg(feature = "vllm")]
+pub use openai_compatible::Vllm;

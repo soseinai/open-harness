@@ -32,6 +32,37 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **OpenAI-compatible variants** (plan §6 — finishes the v1 provider
+  roster alongside Anthropic and OpenAI). `OpenAiLlm` refactored to
+  support the knobs these variants need without forking its code:
+  - `api_key: Option<String>` — Ollama and no-auth vLLM deployments
+    produce an adapter with no `Authorization` header at all.
+  - `name: String` field plus `with_name(..)` builder — trajectory
+    events now identify the specific provider (`"openrouter"`,
+    `"ollama"`, `"vllm"`) rather than always saying `"openai"`.
+  - `extra_headers: Vec<(String, String)>` plus `with_extra_header(..)`
+    — OpenRouter's optional `HTTP-Referer` / `X-Title` attribution
+    headers ride on this.
+  - `without_auth(..)` constructor and a single `build_request` helper
+    that conditionally wires bearer auth + extra headers.
+  Three factories land in a new `openai_compatible` module:
+  - `OpenRouter::from_env(model)` (reads `OPENROUTER_API_KEY`),
+    `OpenRouter::new(api_key, model)`,
+    `OpenRouter::from_env_with_attribution(model, referer, title)`.
+    Targets `https://openrouter.ai/api/v1/chat/completions`.
+  - `Ollama::local(model)` defaults to
+    `http://localhost:11434/v1/chat/completions`; `Ollama::at(url, model)`
+    for custom endpoints. No auth.
+  - `Vllm::at(url, model)` (no auth), `Vllm::at_with_key(url, key, model)`
+    (bearer auth).
+  Each sits behind its own feature flag (`openrouter`, `ollama`, `vllm`)
+  that transitively enables `openai`. 8 new unit tests cover factory
+  name/URL behavior and `from_env` missing-key errors; 4 new wiremock
+  integration tests in `tests/openai_compatible_wire.rs` prove the
+  auth/header wiring hits the wire: bearer-auth present on
+  OpenRouter + attribution headers forwarded, `authorization` header
+  explicitly absent on Ollama and no-auth vLLM, bearer-auth present on
+  keyed vLLM. 129 tests total on `--all-features` (was 117).
 - **OpenAI Chat Completions adapter** (plan §6). New `openai` feature on
   `oharness-providers`; `OpenAiLlm::from_env()` reads `OPENAI_API_KEY` and
   defaults to `gpt-4o`. Both `complete()` and `stream()` hit
