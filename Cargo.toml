@@ -8,6 +8,7 @@ members = [
     "crates/oharness-memory",
     "crates/oharness-trace",
     "crates/oharness-loop",
+    "crates/oharness-budget",
 ]
 
 [workspace.package]
@@ -34,6 +35,7 @@ oharness-tools = { path = "crates/oharness-tools", version = "0.1.0" }
 oharness-memory = { path = "crates/oharness-memory", version = "0.1.0" }
 oharness-trace = { path = "crates/oharness-trace", version = "0.1.0" }
 oharness-loop = { path = "crates/oharness-loop", version = "0.1.0" }
+oharness-budget = { path = "crates/oharness-budget", version = "0.1.0" }
 
 # Core
 serde = { version = "1", features = ["derive"] }

@@ -32,6 +32,21 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **M1b-γ**: new `oharness-budget` crate (plan §10). Concrete
+  `BudgetHandle` implementations — `TokenBudget::input_plus_output`,
+  `StepBudget::turns`, `CostBudget::usd` (feature `cost`),
+  `TimeBudget::wall_clock` (feature `wall-clock`), and `CompositeBudget`
+  (any-child-denies). `PricingTable` + `ModelPricing` with `builtin()`,
+  `load_from(path)` and `override_model(..)` so pricing updates don't
+  require a library bump. `BudgetMiddleware` implements `Llm` directly
+  (plan §5.6.2 / §10.3) to thread one shared counter through pre-check,
+  post-`complete` consume, and per-chunk observe on `stream`; consumes
+  *deltas* between successive `Chunk::Usage` reports so multi-emission
+  providers (like Anthropic) aren't double-counted. `BudgetExceeded` is
+  wrapped in `LlmError::Provider` for `downcast_ref`-based detection.
+  34 tests (8 feature-independent + 19 default + 9 under `cost`/
+  `wall-clock`). Default features: `token`, `step`; optional:
+  `cost`, `wall-clock`.
 - **M1b-β**: middleware helper traits + fluent composition in `oharness-llm`.
   Five helper traits (`RequestLayer`, `ResponseLayer`, `FullLayer`,
   `ChunkObserver`, `ChunkTransformer`) each get a wrapper type
