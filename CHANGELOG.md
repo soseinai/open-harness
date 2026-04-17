@@ -32,6 +32,42 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **OpenAI Chat Completions adapter** (plan §6). New `openai` feature on
+  `oharness-providers`; `OpenAiLlm::from_env()` reads `OPENAI_API_KEY` and
+  defaults to `gpt-4o`. Both `complete()` and `stream()` hit
+  `POST /v1/chat/completions`. Streaming auto-sets
+  `stream_options: {include_usage: true}` so `BudgetMiddleware` can count
+  tokens on the streaming path.
+  Translation notes:
+  - `Content::ToolUse` assistant blocks collapse onto OpenAI's
+    `tool_calls` array; `function.arguments` is a JSON-encoded **string**
+    per OpenAI's schema.
+  - `Content::ToolResult` blocks on user messages expand into separate
+    `role: "tool"` messages carrying `tool_call_id` — a single canonical
+    user message with N tool results produces N wire messages.
+  - `Content::Thinking` is dropped (o-series reasoning stays internal on
+    Chat Completions).
+  - Streaming reserves block index 0 for text and allocates 1.. for tool
+    calls in registration order, since OpenAI's
+    `choices[].delta.tool_calls[i].index` is a per-message counter
+    rather than our block index.
+  - `finish_reason` maps: `stop`→`EndTurn`, `length`→`MaxTokens`,
+    `tool_calls`/`function_call`→`ToolUse`, `content_filter`→`Refusal`,
+    unknown→`Error(raw)`.
+  - `MessageStop` is synthesized at stream close (OpenAI's `[DONE]`
+    sentinel is a wire-level terminator; readers of the canonical
+    `Chunk` stream expect an explicit stop).
+  Capabilities: `streaming: true`, `parallel_tool_use: true`,
+  `vision: true`, `structured_output: true`, `thinking: false`,
+  `prompt_caching: false` (automatic server-side prefix-hit discount
+  isn't addressable via the request shape). 18 unit tests cover wire
+  translation both directions, SSE framing, the delta-decoder state
+  machine (text/tool-call registration, continuation, finish-reason
+  block-close ordering, usage chunk, `[DONE]` sentinel) and
+  `finish_reason` mapping; 4 wiremock integration tests cover the
+  chunk sequence, `complete()` vs `complete_from_stream` round-trip
+  equivalence, capability advertisement, and that the streaming request
+  body always carries `stream_options.include_usage`.
 - **M1b-ζ**: Anthropic prompt caching. `LlmCapabilities::prompt_caching`
   flips to `true` on `AnthropicLlm` and the `wire_messages` encoder
   honours `CompletionRequest.cache_hints`: each `CacheBreakpoint` marks

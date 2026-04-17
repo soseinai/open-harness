@@ -7,8 +7,13 @@
 #[cfg(feature = "anthropic")]
 pub mod anthropic;
 
+#[cfg(feature = "openai")]
+pub mod openai;
+
 pub mod caching;
 
 #[cfg(feature = "anthropic")]
 pub use anthropic::{AnthropicLlm, AnthropicPromptCaching};
 pub use caching::PromptCaching;
+#[cfg(feature = "openai")]
+pub use openai::OpenAiLlm;
