@@ -13,10 +13,10 @@ use async_trait::async_trait;
 use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
 use oharness_core::{
-    CompletionRequest, CompletionResponse, Content, LlmCapabilities, Message, ModelId, StopReason,
-    ToolSpec, Usage,
+    CacheHints, CacheTtl, CompletionRequest, CompletionResponse, Content, LlmCapabilities, Message,
+    ModelId, StopReason, ToolSpec, Usage,
 };
-use oharness_llm::{BlockStartKind, Chunk, ChunkStream, Llm, LlmError};
+use oharness_llm::{BlockStartKind, Chunk, ChunkStream, LayerError, Llm, LlmError, LlmLayer};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::env;
@@ -57,7 +57,7 @@ impl AnthropicLlm {
             timeout: Duration::from_secs(120),
             capabilities: LlmCapabilities {
                 streaming: true,
-                prompt_caching: false,
+                prompt_caching: true,
                 parallel_tool_use: true,
                 vision: true,
                 thinking: true,
@@ -148,7 +148,7 @@ fn to_wire_request(model: &ModelId, req: &CompletionRequest) -> Value {
     let mut body = json!({
         "model": model.as_str(),
         "max_tokens": req.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
-        "messages": wire_messages(&req.messages),
+        "messages": wire_messages(&req.messages, &req.cache_hints),
     });
 
     if let Some(sys) = &req.system {
@@ -170,25 +170,38 @@ fn to_wire_request(model: &ModelId, req: &CompletionRequest) -> Value {
     body
 }
 
-fn wire_messages(messages: &[Message]) -> Value {
+fn wire_messages(messages: &[Message], cache_hints: &CacheHints) -> Value {
+    // Pre-index breakpoints so each message knows its target TTL (if any).
+    // Per plan §4.9 `CacheBreakpoint.message_index` is inclusive — the last
+    // content block of that message receives Anthropic's `cache_control`
+    // marker, declaring the prefix up through that block cacheable.
+    let mut marks: std::collections::HashMap<usize, Option<CacheTtl>> =
+        std::collections::HashMap::new();
+    for bp in &cache_hints.breakpoints {
+        marks.insert(bp.message_index, bp.ttl);
+    }
+
     let mut out: Vec<Value> = Vec::new();
-    for m in messages {
+    for (idx, m) in messages.iter().enumerate() {
         match m {
             Message::System { .. } => {
                 // Anthropic puts system content outside `messages`. Callers that
                 // rely on `CompletionRequest.system` instead of a system Message
                 // get the correct behaviour; legacy system Messages are skipped.
             }
-            Message::User { content, .. } => {
+            Message::User { content, .. } | Message::Assistant { content, .. } => {
+                let mut blocks = wire_content_blocks(content);
+                if let Some(&ttl) = marks.get(&idx) {
+                    apply_cache_control(&mut blocks, ttl);
+                }
+                let role = if matches!(m, Message::User { .. }) {
+                    "user"
+                } else {
+                    "assistant"
+                };
                 out.push(json!({
-                    "role": "user",
-                    "content": wire_content(content),
-                }));
-            }
-            Message::Assistant { content, .. } => {
-                out.push(json!({
-                    "role": "assistant",
-                    "content": wire_content(content),
+                    "role": role,
+                    "content": Value::Array(blocks),
                 }));
             }
         }
@@ -196,8 +209,24 @@ fn wire_messages(messages: &[Message]) -> Value {
     Value::Array(out)
 }
 
-fn wire_content(content: &[Content]) -> Value {
-    let blocks: Vec<Value> = content
+fn apply_cache_control(blocks: &mut [Value], ttl: Option<CacheTtl>) {
+    let Some(last) = blocks.last_mut() else {
+        return;
+    };
+    let ttl_str = match ttl {
+        Some(CacheTtl::Long) => "1h",
+        Some(CacheTtl::Short) | None => "5m",
+    };
+    if let Some(obj) = last.as_object_mut() {
+        obj.insert(
+            "cache_control".to_string(),
+            json!({ "type": "ephemeral", "ttl": ttl_str }),
+        );
+    }
+}
+
+fn wire_content_blocks(content: &[Content]) -> Vec<Value> {
+    content
         .iter()
         .map(|c| match c {
             Content::Text { text } => json!({"type": "text", "text": text}),
@@ -235,8 +264,7 @@ fn wire_content(content: &[Content]) -> Value {
                 json!({"type": "text", "text": "[unsupported content block type for M1a]"})
             }
         })
-        .collect();
-    Value::Array(blocks)
+        .collect()
 }
 
 fn wire_tools(tools: &[ToolSpec]) -> Value {
@@ -723,6 +751,35 @@ fn chunk_stream_from_response(resp: reqwest::Response) -> ChunkStream {
     rx.boxed()
 }
 
+// ---------- prompt caching layer ----------
+
+/// `PromptCaching::anthropic()` layer returned by the factory at
+/// [`crate::caching::PromptCaching::anthropic`].
+///
+/// Anthropic's request body already reads [`CacheHints`] directly in
+/// `wire_messages` and tags the targeted content block with
+/// `cache_control`. This layer is therefore a runtime no-op — its job is
+/// the *construction-time* capability check (plan §5.7): it refuses to
+/// wrap an `Llm` whose `capabilities().prompt_caching` is `false`, which
+/// catches misconfigurations early (e.g., a `ReplayLlm` built from a
+/// trajectory whose meta event reported `prompt_caching: false`, or any
+/// non-Anthropic provider paired with this layer by mistake).
+pub struct AnthropicPromptCaching;
+
+impl<L: Llm> LlmLayer<L> for AnthropicPromptCaching {
+    type Output = L;
+
+    fn wrap(self, inner: L) -> Result<L, LayerError> {
+        if !inner.capabilities().prompt_caching {
+            return Err(LayerError::MissingCapability {
+                layer: "PromptCaching::anthropic",
+                capability: "prompt_caching",
+            });
+        }
+        Ok(inner)
+    }
+}
+
 // ---------- tests ----------
 
 #[cfg(test)]
@@ -1031,5 +1088,145 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(&out[0], Chunk::Raw { .. }));
+    }
+
+    // ---------- prompt caching ----------
+
+    use oharness_core::{
+        CacheBreakpoint, CacheHints as CacheHintsInner, CacheTtl as CacheTtlInner,
+    };
+
+    fn user_msg(text: &str) -> oharness_core::Message {
+        oharness_core::Message::user_text(text)
+    }
+
+    #[test]
+    fn wire_messages_applies_short_cache_control() {
+        let msgs = vec![user_msg("one"), user_msg("two")];
+        let hints = CacheHintsInner {
+            breakpoints: vec![CacheBreakpoint {
+                message_index: 1,
+                ttl: Some(CacheTtlInner::Short),
+            }],
+        };
+        let body = wire_messages(&msgs, &hints);
+        // message 0 should have no cache_control
+        assert!(body[0]["content"][0].get("cache_control").is_none());
+        // message 1's last (only) block has cache_control with ttl 5m
+        assert_eq!(
+            body[1]["content"][0]["cache_control"],
+            json!({"type": "ephemeral", "ttl": "5m"})
+        );
+    }
+
+    #[test]
+    fn wire_messages_applies_long_cache_control() {
+        let msgs = vec![user_msg("x")];
+        let hints = CacheHintsInner {
+            breakpoints: vec![CacheBreakpoint {
+                message_index: 0,
+                ttl: Some(CacheTtlInner::Long),
+            }],
+        };
+        let body = wire_messages(&msgs, &hints);
+        assert_eq!(body[0]["content"][0]["cache_control"]["ttl"], "1h");
+    }
+
+    #[test]
+    fn wire_messages_default_ttl_is_5m() {
+        let msgs = vec![user_msg("x")];
+        let hints = CacheHintsInner {
+            breakpoints: vec![CacheBreakpoint {
+                message_index: 0,
+                ttl: None,
+            }],
+        };
+        let body = wire_messages(&msgs, &hints);
+        assert_eq!(body[0]["content"][0]["cache_control"]["ttl"], "5m");
+    }
+
+    #[test]
+    fn wire_messages_noop_when_no_hints() {
+        let msgs = vec![user_msg("x"), user_msg("y")];
+        let body = wire_messages(&msgs, &CacheHintsInner::default());
+        assert!(body[0]["content"][0].get("cache_control").is_none());
+        assert!(body[1]["content"][0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn wire_messages_tags_last_block_of_multi_block_message() {
+        use oharness_core::Content;
+        let msgs = vec![oharness_core::Message::User {
+            content: vec![Content::text("first"), Content::text("second")],
+            meta: Default::default(),
+        }];
+        let hints = CacheHintsInner {
+            breakpoints: vec![CacheBreakpoint {
+                message_index: 0,
+                ttl: Some(CacheTtlInner::Short),
+            }],
+        };
+        let body = wire_messages(&msgs, &hints);
+        // First block: no marker. Second (last): carries cache_control.
+        assert!(body[0]["content"][0].get("cache_control").is_none());
+        assert_eq!(
+            body[0]["content"][1]["cache_control"],
+            json!({"type": "ephemeral", "ttl": "5m"})
+        );
+    }
+
+    #[test]
+    fn anthropic_capabilities_advertise_prompt_caching() {
+        let llm = AnthropicLlm::new("test-key", "claude-sonnet-4-5");
+        assert!(llm.capabilities().prompt_caching);
+    }
+
+    #[test]
+    fn prompt_caching_layer_wraps_cache_capable_llm() {
+        use oharness_llm::LlmExt;
+        let llm = AnthropicLlm::new("test-key", "claude-sonnet-4-5");
+        let _wrapped = llm
+            .try_with_layer(AnthropicPromptCaching)
+            .expect("anthropic supports caching");
+    }
+
+    #[test]
+    fn prompt_caching_layer_rejects_non_cache_capable_llm() {
+        // Stub whose capabilities report prompt_caching == false.
+        struct NonCachingStub;
+        #[async_trait]
+        impl Llm for NonCachingStub {
+            fn name(&self) -> &str {
+                "stub"
+            }
+            fn capabilities(&self) -> LlmCapabilities {
+                LlmCapabilities::default()
+            }
+            async fn complete(&self, _: CompletionRequest) -> Result<CompletionResponse, LlmError> {
+                unreachable!()
+            }
+            async fn stream(&self, _: CompletionRequest) -> Result<ChunkStream, LlmError> {
+                unreachable!()
+            }
+        }
+        use oharness_llm::LlmExt;
+        match NonCachingStub.try_with_layer(AnthropicPromptCaching) {
+            Ok(_) => panic!("layer should have rejected stub without caching capability"),
+            Err(LayerError::MissingCapability { layer, capability }) => {
+                assert_eq!(layer, "PromptCaching::anthropic");
+                assert_eq!(capability, "prompt_caching");
+            }
+            Err(other) => panic!("wrong error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prompt_caching_factory_returns_anthropic_layer() {
+        use oharness_llm::LlmExt;
+        let llm = AnthropicLlm::new("test-key", "claude-sonnet-4-5");
+        // `PromptCaching::anthropic()` is the stable public entry point.
+        let _wrapped = llm
+            .try_with_layer(crate::caching::PromptCaching::anthropic())
+            .expect("anthropic supports caching");
     }
 }

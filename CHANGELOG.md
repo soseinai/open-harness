@@ -32,6 +32,22 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **M1b-ζ**: Anthropic prompt caching. `LlmCapabilities::prompt_caching`
+  flips to `true` on `AnthropicLlm` and the `wire_messages` encoder
+  honours `CompletionRequest.cache_hints`: each `CacheBreakpoint` marks
+  the last content block of its target message with Anthropic's
+  `cache_control: {"type": "ephemeral", "ttl": "5m" | "1h"}` marker
+  (`CacheTtl::Short` → 5m, `CacheTtl::Long` → 1h, `None` → 5m default).
+  `PromptCaching::anthropic()` is exposed as an `LlmLayer` that fails
+  construction (`try_with_layer`) when
+  `inner.capabilities().prompt_caching == false` — a construction-time
+  check so a `ReplayLlm` built from a non-caching trajectory, or any
+  non-Anthropic provider, can't be paired with this layer by mistake.
+  `CacheTtl` is now re-exported at the `oharness-core` crate root for
+  downstream ergonomics. 9 new unit tests (ttl short/long/default,
+  no-op when hints empty, multi-block last-block targeting, capability
+  advertise, layer accepts caching LLM, layer rejects non-caching LLM,
+  factory round-trip through `PromptCaching::anthropic()`).
 - **M1b-ε**: `ReplayLlm` replays a recorded trajectory as an `Llm`
   implementation (plan §9.6). Two modes:
   - `ReplayMode::Positional` (default): Nth live `complete()` / `stream()`

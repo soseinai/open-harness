@@ -15,7 +15,8 @@ pub mod view;
 
 pub use capabilities::LlmCapabilities;
 pub use completion::{
-    CacheBreakpoint, CacheHints, CompletionRequest, CompletionResponse, StopReason, ToolSpec, Usage,
+    CacheBreakpoint, CacheHints, CacheTtl, CompletionRequest, CompletionResponse, StopReason,
+    ToolSpec, Usage,
 };
 pub use context::{
     ApprovalChannel, ApprovalRequest, ApprovalResponse, BudgetAmount, BudgetDecision, BudgetHandle,

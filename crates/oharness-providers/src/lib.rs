@@ -7,5 +7,8 @@
 #[cfg(feature = "anthropic")]
 pub mod anthropic;
 
+pub mod caching;
+
 #[cfg(feature = "anthropic")]
-pub use anthropic::AnthropicLlm;
+pub use anthropic::{AnthropicLlm, AnthropicPromptCaching};
+pub use caching::PromptCaching;
