@@ -14,11 +14,11 @@ oharness-trace          # EventSink implementations, trajectory writer
 oharness-loop           # Agent + Loop trait + ReactLoop
 ```
 
-See `docs/open-harness-plan.md` in the upstream `ought` repo for the design spec (v1, locked 2026-04-17).
+See [`docs/open-harness-plan.md`](docs/open-harness-plan.md) for the design spec (v1, locked 2026-04-17) and [`docs/remaining-work.md`](docs/remaining-work.md) for the milestone-by-milestone handover plan.
 
 ## Status
 
-**M1a — minimum viable agent.** Non-streaming Anthropic + ReactLoop + FileSink + core types.
+**M1a — minimum viable agent.** Non-streaming Anthropic + ReactLoop + FileSink + core types. Next: M1b (streaming + middleware + replayer).
 
 ## License
 
