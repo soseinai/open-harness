@@ -200,7 +200,7 @@ fn wire_content(content: &[Content]) -> Value {
     let blocks: Vec<Value> = content
         .iter()
         .map(|c| match c {
-            Content::Text(t) => json!({"type": "text", "text": t}),
+            Content::Text { text } => json!({"type": "text", "text": text}),
             Content::ToolUse { id, name, input } => {
                 json!({"type": "tool_use", "id": id, "name": name, "input": input})
             }
@@ -214,7 +214,7 @@ fn wire_content(content: &[Content]) -> Value {
                     .content
                     .iter()
                     .map(|c| match c {
-                        Content::Text(t) => json!({"type": "text", "text": t}),
+                        Content::Text { text } => json!({"type": "text", "text": text}),
                         // Only text passes through in M1a; richer types land with
                         // vision/document support in later milestones.
                         _ => json!({"type": "text", "text": "[unsupported content block]"}),
@@ -227,8 +227,8 @@ fn wire_content(content: &[Content]) -> Value {
                     "is_error": *is_error,
                 })
             }
-            Content::Thinking(t) => {
-                json!({"type": "thinking", "thinking": t})
+            Content::Thinking { thinking } => {
+                json!({"type": "thinking", "thinking": thinking})
             }
             // Vision/audio/document/citation — round-trip as text stubs for M1a.
             Content::Image(_) | Content::Document(_) | Content::Audio(_) | Content::Citation(_) => {
@@ -301,9 +301,9 @@ fn from_wire_response(w: WireResponse) -> CompletionResponse {
         .content
         .into_iter()
         .filter_map(|b| match b {
-            WireBlock::Text { text } => Some(Content::Text(text)),
+            WireBlock::Text { text } => Some(Content::Text { text }),
             WireBlock::ToolUse { id, name, input } => Some(Content::ToolUse { id, name, input }),
-            WireBlock::Thinking { thinking } => Some(Content::Thinking(thinking)),
+            WireBlock::Thinking { thinking } => Some(Content::Thinking { thinking }),
             WireBlock::Other => None,
         })
         .collect();

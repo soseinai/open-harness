@@ -70,7 +70,7 @@ where
     // Assemble content in block-index order.
     let mut content: Vec<(u32, Content)> = Vec::new();
     for (idx, text) in text_blocks {
-        content.push((idx, Content::Text(text)));
+        content.push((idx, Content::Text { text }));
     }
     for (idx, id, name, partial) in tool_blocks {
         let input = if partial.trim().is_empty() {
@@ -80,8 +80,8 @@ where
         };
         content.push((idx, Content::ToolUse { id, name, input }));
     }
-    for (idx, text) in thinking_blocks {
-        content.push((idx, Content::Thinking(text)));
+    for (idx, thinking) in thinking_blocks {
+        content.push((idx, Content::Thinking { thinking }));
     }
     content.sort_by_key(|(i, _)| *i);
     response.content = content.into_iter().map(|(_, c)| c).collect();

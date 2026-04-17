@@ -371,7 +371,7 @@ async fn execute_tool_calls(
                             .content
                             .iter()
                             .map(|c| match c {
-                                Content::Text(t) => json!({"type": "text", "text": t}),
+                                Content::Text { text } => json!({"type": "text", "text": text}),
                                 _ => json!({"type": "other"}),
                             })
                             .collect(),

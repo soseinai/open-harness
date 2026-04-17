@@ -333,3 +333,93 @@ pub type EventPayload = Value;
 
 /// Errors encountered constructing events (currently: namespace collisions).
 pub type EventConstructionError = NamespaceError;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ids::ModelId;
+    use crate::message::{Content, Message};
+    use serde_json::json;
+
+    fn sample_request() -> CompletionRequest {
+        CompletionRequest {
+            messages: vec![Message::Assistant {
+                content: vec![
+                    Content::text("Let me look around."),
+                    Content::ToolUse {
+                        id: "tu_1".into(),
+                        name: "fs_list".into(),
+                        input: json!({"path": "."}),
+                    },
+                ],
+                stop_reason: Some(StopReason::ToolUse),
+                meta: MetadataMap::new(),
+            }],
+            tools: Vec::new(),
+            system: None,
+            max_tokens: Some(1024),
+            temperature: None,
+            stop_sequences: Vec::new(),
+            cache_hints: Default::default(),
+            extensions: MetadataMap::new(),
+        }
+    }
+
+    #[test]
+    fn llm_request_event_round_trips_through_jsonl() {
+        let req = sample_request();
+        let event = Event::new(
+            42,
+            RunId::new(),
+            SpanId::from("span_1"),
+            EventKind::LlmRequest(LlmRequestPayload {
+                request: req,
+                provider: Some("anthropic".into()),
+            }),
+        );
+        let bytes = serde_json::to_vec(&event).expect("serialize");
+        let back: Event = serde_json::from_slice(&bytes).expect("deserialize");
+        assert_eq!(back.seq, 42);
+        match back.kind {
+            EventKind::LlmRequest(p) => {
+                assert_eq!(p.provider.as_deref(), Some("anthropic"));
+                assert_eq!(p.request.messages.len(), 1);
+            }
+            other => panic!("expected LlmRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn llm_response_event_round_trips_through_jsonl() {
+        let response = CompletionResponse {
+            id: "msg_1".into(),
+            model: ModelId::new("claude-sonnet-4-5"),
+            content: vec![Content::text("Hello world")],
+            stop_reason: StopReason::EndTurn,
+            usage: Usage {
+                tokens_input: 25,
+                tokens_output: 15,
+                ..Default::default()
+            },
+        };
+        let event = Event::new(
+            7,
+            RunId::new(),
+            SpanId::from("span_2"),
+            EventKind::LlmResponse(LlmResponsePayload { response }),
+        );
+        let bytes = serde_json::to_vec(&event).expect("serialize");
+        let back: Event = serde_json::from_slice(&bytes).expect("deserialize");
+        match back.kind {
+            EventKind::LlmResponse(p) => {
+                assert_eq!(p.response.id, "msg_1");
+                assert_eq!(p.response.content.len(), 1);
+                assert!(matches!(
+                    &p.response.content[0],
+                    Content::Text { text } if text == "Hello world"
+                ));
+            }
+            other => panic!("expected LlmResponse, got {other:?}"),
+        }
+    }
+}

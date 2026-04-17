@@ -21,6 +21,17 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `docs/remaining-work.md` (commit `f035de8`).
 - Repo hygiene: `rustfmt.toml`, `justfile` (`just ci`), this changelog, and
   `CHANGELOG-schema.md`.
+- **Fix**: convert `Content::Text` and `Content::Thinking` from newtype
+  variants (`Text(String)`, `Thinking(String)`) to struct variants
+  (`Text { text }`, `Thinking { thinking }`). Serde rejects tagged newtype
+  variants wrapping a primitive, so every `llm.request` / `llm.response`
+  event payload was silently dropped from the JSONL trajectory on
+  serialization (`file_sink.rs` warn-and-skipped the error). The on-the-wire
+  JSON shape is unchanged (`{"type":"text","text":"..."}`), so no schema
+  version bump is required. Constructors `Content::text(..)` and new
+  `Content::thinking(..)` keep the ergonomic call sites short. 7 new
+  round-trip unit tests cover every `Content` variant plus full
+  `Event::LlmRequest` / `Event::LlmResponse` envelopes.
 - **M1b-α**: `AnthropicLlm::stream()` implemented via a hand-rolled Server-Sent
   Events parser (no new runtime dependency — only `wiremock` added as a
   dev-dep for the fixture-backed integration tests). Anthropic events

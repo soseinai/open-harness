@@ -138,7 +138,7 @@ impl ToolSet for BashTool {
         };
 
         ToolOutcome::Success(ToolOutput {
-            content: vec![Content::Text(format!("{combined}{tail}"))],
+            content: vec![Content::text(format!("{combined}{tail}"))],
             truncated,
         })
     }

@@ -88,33 +88,6 @@ fn make_llm(server: &MockServer) -> AnthropicLlm {
         .with_base_url(format!("{}/v1/messages", server.uri()))
 }
 
-/// `Content` currently lacks `PartialEq` (and `#[serde(tag = "type")]` newtype
-/// variants block `serde_json::to_value`), so the streaming vs. non-streaming
-/// round-trip test compares content manually on the variants this fixture
-/// exercises.
-fn content_equal(a: &[Content], b: &[Content]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b.iter()).all(|pair| match pair {
-        (Content::Text(x), Content::Text(y)) => x == y,
-        (Content::Thinking(x), Content::Thinking(y)) => x == y,
-        (
-            Content::ToolUse {
-                id: xi,
-                name: xn,
-                input: xp,
-            },
-            Content::ToolUse {
-                id: yi,
-                name: yn,
-                input: yp,
-            },
-        ) => xi == yi && xn == yn && xp == yp,
-        _ => false,
-    })
-}
-
 fn chunk_label(c: &Chunk) -> &'static str {
     match c {
         Chunk::MessageStart { .. } => "message_start",
@@ -174,11 +147,11 @@ async fn complete_from_stream_matches_complete() {
     let via_stream = complete_from_stream(stream).await.expect("drain stream");
 
     assert_eq!(via_complete.id, via_stream.id);
-    assert!(
-        content_equal(&via_complete.content, &via_stream.content),
-        "content differs: complete={:?} stream={:?}",
-        via_complete.content,
-        via_stream.content
+    // `Content` serializes cleanly now, so compare via JSON for a full
+    // structural check without needing `PartialEq` on every inner type.
+    assert_eq!(
+        serde_json::to_value(&via_complete.content).expect("serialize complete content"),
+        serde_json::to_value(&via_stream.content).expect("serialize stream content"),
     );
     assert_eq!(via_complete.stop_reason, via_stream.stop_reason);
     assert_eq!(
@@ -192,7 +165,7 @@ async fn complete_from_stream_matches_complete() {
 
     // Surface-level sanity: content is a single text block "Hello world".
     assert_eq!(via_stream.content.len(), 1);
-    assert!(matches!(&via_stream.content[0], Content::Text(t) if t == "Hello world"));
+    assert!(matches!(&via_stream.content[0], Content::Text { text } if text == "Hello world"));
 }
 
 #[tokio::test]

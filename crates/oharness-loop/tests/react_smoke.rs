@@ -50,7 +50,7 @@ async fn scripted_tool_call_roundtrip() {
         id: "msg_001".into(),
         model: ModelId::new("scripted-test"),
         content: vec![
-            Content::Text("Let me look around.".into()),
+            Content::text("Let me look around."),
             Content::ToolUse {
                 id: "tu_1".into(),
                 name: "fs_list".into(),
@@ -67,7 +67,7 @@ async fn scripted_tool_call_roundtrip() {
     let final_response = CompletionResponse {
         id: "msg_002".into(),
         model: ModelId::new("scripted-test"),
-        content: vec![Content::Text("Done.".into())],
+        content: vec![Content::text("Done.")],
         stop_reason: StopReason::EndTurn,
         usage: Usage {
             tokens_input: 20,

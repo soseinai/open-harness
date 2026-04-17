@@ -59,7 +59,7 @@ impl<'a> ConversationView<'a> {
                                 c,
                                 Content::ToolUse { .. }
                                     | Content::ToolResult { .. }
-                                    | Content::Thinking(_)
+                                    | Content::Thinking { .. }
                             )
                         })
                         .cloned()
@@ -89,13 +89,14 @@ impl<'a> ConversationView<'a> {
                 Message::User { content, .. } | Message::Assistant { content, .. } => content
                     .iter()
                     .map(|c| match c {
-                        Content::Text(s) | Content::Thinking(s) => s.len(),
+                        Content::Text { text } => text.len(),
+                        Content::Thinking { thinking } => thinking.len(),
                         Content::ToolUse { input, .. } => input.to_string().len(),
                         Content::ToolResult { output, .. } => output
                             .content
                             .iter()
                             .map(|inner| match inner {
-                                Content::Text(t) => t.len(),
+                                Content::Text { text } => text.len(),
                                 _ => 0,
                             })
                             .sum(),

@@ -40,14 +40,14 @@ impl Message {
 
     pub fn user_text(text: impl Into<String>) -> Self {
         Self::User {
-            content: vec![Content::Text(text.into())],
+            content: vec![Content::text(text)],
             meta: MetadataMap::new(),
         }
     }
 
     pub fn assistant_text(text: impl Into<String>) -> Self {
         Self::Assistant {
-            content: vec![Content::Text(text.into())],
+            content: vec![Content::text(text)],
             stop_reason: None,
             meta: MetadataMap::new(),
         }
@@ -55,10 +55,17 @@ impl Message {
 }
 
 /// A single content block inside a message.
+///
+/// All variants are struct-shaped so the enum round-trips cleanly through
+/// serde's `#[serde(tag = "type")]` representation — serde refuses to
+/// serialize tagged newtype variants that wrap a primitive, which would
+/// otherwise silently break `llm.request` / `llm.response` event payloads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Content {
-    Text(String),
+    Text {
+        text: String,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -71,7 +78,9 @@ pub enum Content {
         is_error: bool,
     },
     /// Extended-thinking blocks (Anthropic).
-    Thinking(String),
+    Thinking {
+        thinking: String,
+    },
     Image(ImageRef),
     Document(DocumentRef),
     Audio(AudioRef),
@@ -80,7 +89,11 @@ pub enum Content {
 
 impl Content {
     pub fn text(s: impl Into<String>) -> Self {
-        Self::Text(s.into())
+        Self::Text { text: s.into() }
+    }
+
+    pub fn thinking(s: impl Into<String>) -> Self {
+        Self::Thinking { thinking: s.into() }
     }
 }
 
@@ -95,7 +108,7 @@ pub struct ToolOutput {
 impl ToolOutput {
     pub fn text(s: impl Into<String>) -> Self {
         Self {
-            content: vec![Content::Text(s.into())],
+            content: vec![Content::text(s)],
             truncated: false,
         }
     }
@@ -174,4 +187,96 @@ pub struct CitationRef {
     pub quoted_text: Option<String>,
     #[serde(default, skip_serializing_if = "MetadataMap::is_empty")]
     pub extensions: MetadataMap,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn round_trip(content: &Content) -> Content {
+        let bytes = serde_json::to_vec(content).expect("serialize Content");
+        serde_json::from_slice::<Content>(&bytes).expect("deserialize Content")
+    }
+
+    #[test]
+    fn text_serializes_as_tagged_struct() {
+        let c = Content::text("hello");
+        let v = serde_json::to_value(&c).expect("to_value");
+        assert_eq!(v, json!({"type": "text", "text": "hello"}));
+        assert!(matches!(round_trip(&c), Content::Text { text } if text == "hello"));
+    }
+
+    #[test]
+    fn thinking_serializes_as_tagged_struct() {
+        let c = Content::thinking("hmm");
+        let v = serde_json::to_value(&c).expect("to_value");
+        assert_eq!(v, json!({"type": "thinking", "thinking": "hmm"}));
+        assert!(matches!(round_trip(&c), Content::Thinking { thinking } if thinking == "hmm"));
+    }
+
+    #[test]
+    fn tool_use_round_trips() {
+        let c = Content::ToolUse {
+            id: "tu_1".into(),
+            name: "fs_list".into(),
+            input: json!({"path": "."}),
+        };
+        let v = serde_json::to_value(&c).expect("to_value");
+        assert_eq!(v["type"], "tool_use");
+        assert_eq!(v["id"], "tu_1");
+        assert_eq!(v["name"], "fs_list");
+        assert_eq!(v["input"], json!({"path": "."}));
+        assert!(matches!(round_trip(&c), Content::ToolUse { id, .. } if id == "tu_1"));
+    }
+
+    #[test]
+    fn tool_result_round_trips() {
+        let c = Content::ToolResult {
+            tool_use_id: "tu_1".into(),
+            output: ToolOutput::text("ok"),
+            is_error: false,
+        };
+        let bytes = serde_json::to_vec(&c).expect("serialize");
+        let back: Content = serde_json::from_slice(&bytes).expect("deserialize");
+        match back {
+            Content::ToolResult {
+                tool_use_id,
+                output,
+                is_error,
+            } => {
+                assert_eq!(tool_use_id, "tu_1");
+                assert!(!is_error);
+                assert!(!output.truncated);
+                assert!(
+                    matches!(&output.content[..], [Content::Text { text }] if text == "ok"),
+                    "output content: {:?}",
+                    output.content
+                );
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_with_mixed_content_round_trips() {
+        let msg = Message::Assistant {
+            content: vec![
+                Content::text("Here's what I found:"),
+                Content::ToolUse {
+                    id: "tu_1".into(),
+                    name: "fs_list".into(),
+                    input: json!({"path": "."}),
+                },
+            ],
+            stop_reason: Some(StopReason::ToolUse),
+            meta: MetadataMap::new(),
+        };
+        let bytes = serde_json::to_vec(&msg).expect("serialize Message");
+        let back: Message = serde_json::from_slice(&bytes).expect("deserialize Message");
+        match back {
+            Message::Assistant { content, .. } => assert_eq!(content.len(), 2),
+            other => panic!("expected Assistant, got {other:?}"),
+        }
+    }
 }

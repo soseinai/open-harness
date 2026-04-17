@@ -115,7 +115,7 @@ async fn do_read(input: Value, root: &Path) -> ToolOutcome {
 
     match tokio::fs::read_to_string(&resolved).await {
         Ok(contents) => ToolOutcome::Success(ToolOutput {
-            content: vec![Content::Text(contents)],
+            content: vec![Content::Text { text: contents }],
             truncated: false,
         }),
         Err(e) => ToolOutcome::error(format!("fs_read: {e}"), true),

@@ -70,8 +70,8 @@ impl MemoryPolicy for ElideToolResults {
                         *slot = Content::ToolResult {
                             tool_use_id: tool_use_id.clone(),
                             output: ToolOutput {
-                                content: vec![Content::Text(
-                                    "[elided: output summarised for context length]".to_string(),
+                                content: vec![Content::text(
+                                    "[elided: output summarised for context length]",
                                 )],
                                 truncated: true,
                             },
