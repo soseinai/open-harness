@@ -32,6 +32,63 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **M2 — `oharness-critic` crate** (plan §11). First slice of the
+  research-grade milestone: the critic / reflector trait surface plus
+  shipped implementations, with no loop integration yet. The loop-side
+  work (ConversationLoop, `run_reflexion`, `Agent::injector()` accessor)
+  is M2 part 2; `oharness-eval` + SWE-bench-lite is M2 part 3.
+  New types in `oharness-core` (since they're shared by critic, eval,
+  and the eventual reflexion loop — dependency-cleanness):
+  - `AssistantTurn` + `ToolCall` — bundles a completed assistant turn
+    with its span id, parsed tool calls, usage, and stop reason.
+    `AssistantTurn::new(..)` auto-extracts `ToolCall`s from the message
+    content.
+  - `TrajectoryView<'a>` — read-only mid-run peek at the event slice,
+    with `turn_count()` and `to_handle()`. Distinct from the post-run
+    `TrajectoryHandle`.
+  - `EvaluationResult { score, passed, details }` — `pass()` / `fail()` /
+    `scored(f)` constructors, used by both critic Episode and the
+    upcoming eval crate.
+  - `Episode<'a>` + `OwnedEpisode` + `Reflection` — the
+    `run_reflexion` iteration record.
+  New `oharness-critic` crate (10 modules):
+  - `Critic` trait + `CriticVerdict` (Accept / AcceptWithNote / Reject /
+    Revise / Abort) + `AssessmentContext<'a>` + `CriticTrigger`
+    (AfterAssistant default, AfterToolResult, AfterEveryNTurns, OnDemand).
+  - `CompositeCritic` + four aggregation policies: `FirstReject`
+    (sequential short-circuit), `AllMustAccept` (parallel,
+    first-non-accept wins), `MajorityVote`, `Weighted(Vec<f32>)`.
+    Parallel policies fan out via `futures::join_all`.
+  - `Reflector` trait — always invoked per episode, returns
+    `Option<Reflection>` so the reflector gates internally.
+  - `ReflectionInjector` (`RequestLayer`) — threads accumulated
+    reflections into the next `CompletionRequest`, either as a system
+    suffix (default, appends to `req.system`) or as a prefix onto the
+    first user message's first text block. `set_reflections(..)` lets
+    `run_reflexion` swap the reflection list between episodes without
+    rebuilding middleware. Emits `reflection.injected { episode_index,
+    reflection_count, placement }` when a `ScopedEmitter` is attached.
+  - Shipped impls:
+    - `NullReflector` (always returns None).
+    - `LlmReflector` (calls any `Arc<dyn Llm>` with a `{task} {score}
+      {passed} {prior_reflections}` templated prompt; returns None on
+      empty text or LLM error).
+    - `RegexDenyCritic` (feature `regex-deny`; rejects if any pattern
+      matches the assistant's rendered text).
+    - `TestCritic` (feature `test-runner`; runs an external command via
+      `tokio::process`, accepts on exit 0, rejects with the last 2KB of
+      stderr otherwise).
+    - `LlmJudgeCritic` (feature `llm-judge`; prompts a judge LLM with
+      a rubric, parses a `SCORE: <float>` line, accepts ≥ threshold;
+      fails open on parse error or LLM error).
+  - `ConstitutionalCritic` deliberately deferred — its principle-based
+    revision flow has richer config than this M2 slice needs.
+  41 new unit tests cover each piece: aggregation policies (all four),
+  parallel behavior, empty-composite accept, mismatched-weights panic
+  guard, `ReflectionInjector` placements and ordered rendering,
+  `parse_score` edge cases, `TestCritic` exit codes / spawn failure /
+  empty command, `LlmJudgeCritic` fail-open paths. 174 tests total
+  on `--all-features` (was 129).
 - **OpenAI-compatible variants** (plan §6 — finishes the v1 provider
   roster alongside Anthropic and OpenAI). `OpenAiLlm` refactored to
   support the knobs these variants need without forking its code:

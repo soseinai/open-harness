@@ -1,0 +1,38 @@
+[package]
+name = "oharness-critic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Critic / Reflector traits, composition, and shipped impls for open-harness"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Per plan §16.1: shipped critic/reflector impls are opt-in so the core
+# trait surface stays dep-free.
+llm-judge = []
+test-runner = []
+regex-deny = ["regex"]
+# `constitutional` deferred to a later pass; the principle-based critic
+# has richer config than M2 needs right now.
+
+[dependencies]
+oharness-core = { workspace = true }
+oharness-llm = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+
+regex = { version = "1", optional = true }
+
+[dev-dependencies]
+time = { workspace = true }

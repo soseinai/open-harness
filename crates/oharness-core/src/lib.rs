@@ -2,6 +2,7 @@
 //!
 //! Zero-IO foundation. Every other crate in the workspace depends on this one.
 
+pub mod assessment;
 pub mod capabilities;
 pub mod completion;
 pub mod context;
@@ -13,6 +14,9 @@ pub mod task;
 pub mod trajectory;
 pub mod view;
 
+pub use assessment::{
+    AssistantTurn, Episode, EvaluationResult, OwnedEpisode, Reflection, ToolCall, TrajectoryView,
+};
 pub use capabilities::LlmCapabilities;
 pub use completion::{
     CacheBreakpoint, CacheHints, CacheTtl, CompletionRequest, CompletionResponse, StopReason,
