@@ -9,7 +9,7 @@ use oharness_core::{
 use oharness_llm::Llm;
 use oharness_memory::{MemoryPolicy, Passthrough};
 use oharness_tools::ToolSet;
-use oharness_trace::InMemorySink;
+use oharness_trace::{InMemorySink, RequestTracer, ToolTracer};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
@@ -54,9 +54,17 @@ impl Agent {
         });
         let emitter = ScopedEmitter::new(fan, run_id, seq);
 
+        // M1b-δ: wrap the user's Llm + ToolSet in the tracing middleware so
+        // llm.* and tool.* events are emitted at the provider / tool boundary
+        // instead of from inside the loop. See docs/remaining-work.md §2.4.
+        let traced_llm: Arc<dyn Llm> =
+            Arc::new(RequestTracer::new(self.llm.clone(), emitter.clone()));
+        let traced_tools: Arc<dyn ToolSet> =
+            Arc::new(ToolTracer::new(self.tools.clone(), emitter.clone()));
+
         let loop_ctx = LoopContext {
-            llm: self.llm.clone(),
-            tools: self.tools.clone(),
+            llm: traced_llm,
+            tools: traced_tools,
             memory: self.memory.clone(),
             events: emitter,
             budget: self.budget.clone(),

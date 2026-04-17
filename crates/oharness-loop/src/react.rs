@@ -1,14 +1,14 @@
 //! The default ReAct-style loop: thought → action → observation.
 //!
-//! Emits all lifecycle / llm / tool events directly via `ScopedEmitter`. M1a
-//! doesn't have the tracing-middleware layer from §9.5 yet — this loop stands in.
+//! Emits only lifecycle events (`meta`, `run.*`, `turn.*`, `budget.exceeded`).
+//! `llm.*` and `tool.*` events are produced by `RequestTracer` and
+//! `ToolTracer` in `oharness-trace`, wired in by `Agent::run`
+//! (see docs/remaining-work.md §2.4 — M1b-δ refactor).
 
 use crate::loop_trait::{Loop, LoopContext};
 use async_trait::async_trait;
 use oharness_core::event::{
-    EventKind, LlmFailedPayload, LlmRequestPayload, LlmResponsePayload, MetaPayload,
-    RunFinishedPayload, RunStartedPayload, ToolCallFailedPayload, ToolCallFinishedPayload,
-    ToolCallStartedPayload, TurnFinishedPayload, TurnPayload,
+    EventKind, MetaPayload, RunFinishedPayload, RunStartedPayload, TurnFinishedPayload, TurnPayload,
 };
 use oharness_core::{
     AgentError, BudgetRequest, CompletionRequest, CompletionResponse, Content, ConversationView,
@@ -18,7 +18,8 @@ use oharness_core::{
 use oharness_memory::policy::MemoryContext;
 use oharness_tools::context::ToolContext;
 use oharness_tools::toolset::ToolOutcome;
-use serde_json::{json, Value};
+use oharness_trace::TOOL_USE_ID_KEY;
+use serde_json::json;
 use time::OffsetDateTime;
 
 pub struct ReactLoop {
@@ -88,8 +89,6 @@ impl Loop for ReactLoop {
 
         let mut termination: Option<Termination> = None;
         let mut turn_index: u32 = 0;
-        let mut tool_call_counter: u32 = 0;
-
         while termination.is_none() {
             if turn_index >= ctx.max_turns {
                 termination = Some(Termination::Truncated {
@@ -156,32 +155,15 @@ impl Loop for ReactLoop {
                 break;
             }
 
-            // ---- build + emit llm.request ----
+            // ---- build + issue LLM call (llm.* events are emitted by
+            //      RequestTracer wrapping ctx.llm) ----
             let mut req = CompletionRequest::new(transformed);
             req.tools = tools_specs.clone();
             req.system = self.system_prompt.clone();
 
-            let llm_span = format!("llm-{turn_index}");
-            let llm_open_seq = ctx.events.emit(
-                &llm_span,
-                EventKind::LlmRequest(LlmRequestPayload {
-                    request: req.clone(),
-                    provider: Some(ctx.llm.name().to_string()),
-                }),
-                Some(turn_open_seq),
-            );
-
-            // ---- LLM call ----
             let response = match ctx.llm.complete(req).await {
                 Ok(r) => r,
                 Err(e) => {
-                    ctx.events.emit(
-                        &llm_span,
-                        EventKind::LlmFailed(LlmFailedPayload {
-                            reason: e.to_string(),
-                        }),
-                        Some(llm_open_seq),
-                    );
                     termination = Some(Termination::Failed {
                         error: RunError {
                             category: RunErrorCategory::Llm,
@@ -210,14 +192,6 @@ impl Loop for ReactLoop {
                 })
                 .await;
 
-            ctx.events.emit(
-                &llm_span,
-                EventKind::LlmResponse(LlmResponsePayload {
-                    response: response.clone(),
-                }),
-                Some(llm_open_seq),
-            );
-
             // ---- append assistant message ----
             let assistant_msg = Message::Assistant {
                 content: response.content.clone(),
@@ -227,15 +201,7 @@ impl Loop for ReactLoop {
             messages.push(assistant_msg.clone());
 
             // ---- tool execution if any ----
-            let tool_calls_in_turn = execute_tool_calls(
-                &response,
-                ctx,
-                &mut messages,
-                &turn_span,
-                turn_open_seq,
-                &mut tool_call_counter,
-            )
-            .await;
+            let tool_calls_in_turn = execute_tool_calls(&response, ctx, &mut messages).await;
 
             // ---- turn.finished ----
             ctx.events.emit(
@@ -331,9 +297,6 @@ async fn execute_tool_calls(
     response: &CompletionResponse,
     ctx: &LoopContext,
     messages: &mut Vec<Message>,
-    turn_span: &str,
-    turn_parent_seq: u64,
-    tool_call_counter: &mut u32,
 ) -> u32 {
     let mut results: Vec<Content> = Vec::new();
     let mut count = 0u32;
@@ -341,51 +304,24 @@ async fn execute_tool_calls(
     for block in &response.content {
         if let Content::ToolUse { id, name, input } = block {
             count += 1;
-            let span = format!("tool-{}", *tool_call_counter);
-            *tool_call_counter += 1;
 
-            let tool_start = ctx.events.emit(
-                &span,
-                EventKind::ToolCallStarted(ToolCallStartedPayload {
-                    tool_name: name.clone(),
-                    tool_use_id: id.clone(),
-                    input: input.clone(),
-                }),
-                Some(turn_parent_seq),
-            );
-
+            // tool.call.* events are emitted by the ToolTracer wrapping
+            // ctx.tools. Pass the tool_use_id via ctx.extensions so the
+            // tracer can populate its payloads (see tracer::TOOL_USE_ID_KEY).
+            let mut extensions = MetadataMap::new();
+            extensions.insert(TOOL_USE_ID_KEY.to_string(), json!(id));
             let tool_ctx = ToolContext {
                 events: ctx.events.sink().clone(),
                 budget: ctx.budget.clone(),
                 cancellation: ctx.cancellation.clone(),
                 approval: ctx.approval.clone(),
                 workspace: None,
-                extensions: MetadataMap::new(),
+                extensions,
             };
 
             let outcome = ctx.tools.execute(name, input.clone(), &tool_ctx).await;
             match outcome {
                 ToolOutcome::Success(output) => {
-                    let output_repr: Value = Value::Array(
-                        output
-                            .content
-                            .iter()
-                            .map(|c| match c {
-                                Content::Text { text } => json!({"type": "text", "text": text}),
-                                _ => json!({"type": "other"}),
-                            })
-                            .collect(),
-                    );
-                    ctx.events.emit(
-                        &span,
-                        EventKind::ToolCallFinished(ToolCallFinishedPayload {
-                            tool_name: name.clone(),
-                            tool_use_id: id.clone(),
-                            output: output_repr,
-                            truncated: output.truncated,
-                        }),
-                        Some(tool_start),
-                    );
                     results.push(Content::ToolResult {
                         tool_use_id: id.clone(),
                         output,
@@ -394,18 +330,8 @@ async fn execute_tool_calls(
                 }
                 ToolOutcome::ExecutionError {
                     message,
-                    recoverable,
+                    recoverable: _,
                 } => {
-                    ctx.events.emit(
-                        &span,
-                        EventKind::ToolCallFailed(ToolCallFailedPayload {
-                            tool_name: name.clone(),
-                            tool_use_id: id.clone(),
-                            reason: message.clone(),
-                            recoverable,
-                        }),
-                        Some(tool_start),
-                    );
                     results.push(Content::ToolResult {
                         tool_use_id: id.clone(),
                         output: oharness_core::message::ToolOutput::text(format!(
@@ -415,16 +341,6 @@ async fn execute_tool_calls(
                     });
                 }
                 ToolOutcome::Denied { reason } => {
-                    ctx.events.emit(
-                        &span,
-                        EventKind::ToolCallFailed(ToolCallFailedPayload {
-                            tool_name: name.clone(),
-                            tool_use_id: id.clone(),
-                            reason: format!("denied: {reason}"),
-                            recoverable: false,
-                        }),
-                        Some(tool_start),
-                    );
                     results.push(Content::ToolResult {
                         tool_use_id: id.clone(),
                         output: oharness_core::message::ToolOutput::text(format!(
@@ -434,16 +350,6 @@ async fn execute_tool_calls(
                     });
                 }
                 ToolOutcome::Cancelled => {
-                    ctx.events.emit(
-                        &span,
-                        EventKind::ToolCallFailed(ToolCallFailedPayload {
-                            tool_name: name.clone(),
-                            tool_use_id: id.clone(),
-                            reason: "cancelled".to_string(),
-                            recoverable: false,
-                        }),
-                        Some(tool_start),
-                    );
                     results.push(Content::ToolResult {
                         tool_use_id: id.clone(),
                         output: oharness_core::message::ToolOutput::text("cancelled"),
@@ -460,7 +366,6 @@ async fn execute_tool_calls(
             meta: MetadataMap::new(),
         });
     }
-    let _ = turn_span;
     count
 }
 

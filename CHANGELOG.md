@@ -32,6 +32,32 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **M1b-δ**: tracing middleware + `ReactLoop` refactor. `oharness-trace`
+  gains three types:
+  - `RequestTracer` wraps `Arc<dyn Llm>`, implementing `Llm`. Emits
+    `llm.request` before `complete()` / `stream()` and `llm.response` or
+    `llm.failed` after `complete()`. For `stream()` it wraps each chunk
+    with an inline emission that produces `llm.stream.chunk` events, so
+    the streaming path never depends on the loop re-implementing the
+    decoder.
+  - `StreamTracer` is a standalone `ChunkObserver` that emits
+    `llm.stream.chunk` events. Users composing their own middleware chain
+    attach it via `LlmExt::with_chunk_observer`.
+  - `ToolTracer` wraps `Arc<dyn ToolSet>`, implementing `ToolSet`. Emits
+    `tool.call.started` before `execute()` and `tool.call.finished` /
+    `tool.call.failed` after. Reads `tool_use_id` from
+    `ToolContext.extensions["oharness.tool_use_id"]` — the new
+    `TOOL_USE_ID_KEY` constant exposes this contract for other loop
+    implementations.
+  `Agent::run` now wraps the user's LLM and tool set in `RequestTracer` /
+  `ToolTracer` before building `LoopContext`, and `ReactLoop` no longer
+  emits `llm.*` or `tool.*` events itself — it only emits lifecycle
+  events (`meta`, `run.*`, `turn.*`, `budget.exceeded`). The smoke test
+  still sees the same event set (now from tracers instead of the loop),
+  as per plan §20.3. 6 tracer unit tests (complete/response pairs,
+  failure path, stream chunks, standalone observer, tool
+  started/finished, tool execution-error failure) alongside the existing
+  integration coverage.
 - **M1b-γ**: new `oharness-budget` crate (plan §10). Concrete
   `BudgetHandle` implementations — `TokenBudget::input_plus_output`,
   `StepBudget::turns`, `CostBudget::usd` (feature `cost`),
