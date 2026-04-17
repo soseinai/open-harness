@@ -40,14 +40,13 @@ impl LlmError {
 /// requirement isn't met.
 #[derive(Debug, thiserror::Error)]
 pub enum LayerError {
-    #[error("layer `{layer}` requires capability `{capability}`, which the inner Llm does not expose")]
+    #[error(
+        "layer `{layer}` requires capability `{capability}`, which the inner Llm does not expose"
+    )]
     MissingCapability {
         layer: &'static str,
         capability: &'static str,
     },
     #[error("layer `{layer}` rejected inner Llm: {reason}")]
-    Rejected {
-        layer: &'static str,
-        reason: String,
-    },
+    Rejected { layer: &'static str, reason: String },
 }

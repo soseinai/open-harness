@@ -62,11 +62,9 @@ impl MemoryPolicy for TruncateAfterTokens {
                 "estimate_before": original,
                 "estimate_after": ConversationView::new(&final_msgs).token_estimate(),
             });
-            let _ = ctx.events.try_emit(
-                "memory-0",
-                EventKind::MemoryEvicted(payload),
-                None,
-            );
+            let _ = ctx
+                .events
+                .try_emit("memory-0", EventKind::MemoryEvicted(payload), None);
         }
 
         Ok(final_msgs)

@@ -13,7 +13,7 @@ use oharness_core::{
 };
 use oharness_llm::{ChunkStream, Llm, LlmError};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::env;
 use std::time::Duration;
 
@@ -34,8 +34,7 @@ impl AnthropicLlm {
     /// Construct from the `ANTHROPIC_API_KEY` environment variable, defaulting to
     /// `claude-sonnet-4-5`. Fails if the env var is missing.
     pub fn from_env() -> Result<Self, LlmError> {
-        let api_key = env::var("ANTHROPIC_API_KEY")
-            .map_err(|_| LlmError::Authentication)?;
+        let api_key = env::var("ANTHROPIC_API_KEY").map_err(|_| LlmError::Authentication)?;
         Ok(Self::new(api_key, "claude-sonnet-4-5"))
     }
 

@@ -54,10 +54,7 @@ impl Workspace {
         }
     }
 
-    pub fn with_sync_cleanup(
-        mut self,
-        f: impl FnOnce() + Send + 'static,
-    ) -> Self {
+    pub fn with_sync_cleanup(mut self, f: impl FnOnce() + Send + 'static) -> Self {
         self.cleanup = std::sync::Mutex::new(Some(WorkspaceCleanup::Sync(Box::new(f))));
         self
     }
@@ -79,7 +76,9 @@ impl Workspace {
 
 impl std::fmt::Debug for Workspace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Workspace").field("path", &self.path).finish()
+        f.debug_struct("Workspace")
+            .field("path", &self.path)
+            .finish()
     }
 }
 

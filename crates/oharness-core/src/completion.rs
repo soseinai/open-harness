@@ -1,8 +1,8 @@
 //! Shared completion types (§4.9).
 
-use crate::MetadataMap;
 use crate::ids::ModelId;
 use crate::message::{Content, Message};
+use crate::MetadataMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

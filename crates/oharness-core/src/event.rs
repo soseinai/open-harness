@@ -1,11 +1,11 @@
 //! Event schema (§4.7). The JSONL format is the source of truth for trajectory files.
 
-use crate::MetadataMap;
 use crate::capabilities::LlmCapabilities;
 use crate::completion::{CompletionRequest, CompletionResponse, StopReason, Usage};
 use crate::context::NamespaceError;
 use crate::ids::{RunId, SpanId};
 use crate::task::Task;
+use crate::MetadataMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -71,12 +71,7 @@ pub struct Event {
 }
 
 impl Event {
-    pub fn new(
-        seq: u64,
-        run_id: RunId,
-        span_id: impl Into<SpanId>,
-        kind: EventKind,
-    ) -> Self {
+    pub fn new(seq: u64, run_id: RunId, span_id: impl Into<SpanId>, kind: EventKind) -> Self {
         Self {
             v: SchemaVersion::CURRENT,
             seq,
@@ -216,10 +211,7 @@ pub const RESERVED_NAMESPACE_PREFIXES: &[&str] = &[
 impl EventKind {
     /// Construct a `user.log` event. Returns an error if the namespace is empty or
     /// collides with a built-in category prefix.
-    pub fn user_log(
-        namespace: impl Into<String>,
-        data: Value,
-    ) -> Result<Self, NamespaceError> {
+    pub fn user_log(namespace: impl Into<String>, data: Value) -> Result<Self, NamespaceError> {
         let namespace = namespace.into();
         if namespace.is_empty() {
             return Err(NamespaceError::Empty);

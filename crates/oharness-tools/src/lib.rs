@@ -11,5 +11,5 @@ pub mod fs;
 pub use context::{ToolContext, Workspace};
 pub use toolset::{ToolError, ToolOutcome, ToolSet};
 
-pub use oharness_core::ToolSpec;
 pub use oharness_core::message::ToolOutput;
+pub use oharness_core::ToolSpec;

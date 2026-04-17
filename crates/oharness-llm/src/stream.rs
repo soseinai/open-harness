@@ -46,7 +46,10 @@ where
                     slot.1.push_str(&text);
                 }
             }
-            Chunk::ToolUseDelta { index, partial_json } => {
+            Chunk::ToolUseDelta {
+                index,
+                partial_json,
+            } => {
                 if let Some(slot) = tool_blocks.iter_mut().find(|(i, _, _, _)| *i == index) {
                     slot.3.push_str(&partial_json);
                 }
@@ -75,14 +78,7 @@ where
         } else {
             serde_json::from_str(&partial).unwrap_or(Value::String(partial))
         };
-        content.push((
-            idx,
-            Content::ToolUse {
-                id,
-                name,
-                input,
-            },
-        ));
+        content.push((idx, Content::ToolUse { id, name, input }));
     }
     for (idx, text) in thinking_blocks {
         content.push((idx, Content::Thinking(text)));

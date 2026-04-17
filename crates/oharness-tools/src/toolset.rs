@@ -2,8 +2,8 @@
 
 use crate::context::ToolContext;
 use async_trait::async_trait;
-use oharness_core::ToolSpec;
 use oharness_core::message::ToolOutput;
+use oharness_core::ToolSpec;
 use serde_json::Value;
 
 #[async_trait]

@@ -46,8 +46,21 @@ impl Task {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Attachment {
-    Text { name: String, content: String },
-    File { name: String, path: PathBuf },
-    Inline { name: String, mime: String, bytes: Vec<u8> },
-    Url { url: Url, mime_hint: Option<String> },
+    Text {
+        name: String,
+        content: String,
+    },
+    File {
+        name: String,
+        path: PathBuf,
+    },
+    Inline {
+        name: String,
+        mime: String,
+        bytes: Vec<u8>,
+    },
+    Url {
+        url: Url,
+        mime_hint: Option<String>,
+    },
 }

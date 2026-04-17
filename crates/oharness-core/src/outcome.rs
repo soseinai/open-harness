@@ -1,9 +1,9 @@
 //! `RunOutcome` and related types (§4.4) plus `AgentError` (§16.2).
 
-use crate::MetadataMap;
 use crate::completion::Usage;
 use crate::ids::{ModelId, RunId};
 use crate::trajectory::TrajectoryHandle;
+use crate::MetadataMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -40,19 +40,10 @@ pub struct RunOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Termination {
-    Completed {
-        reason: CompletionReason,
-    },
-    Truncated {
-        limit: TruncationLimit,
-    },
-    Failed {
-        error: RunError,
-        at_turn: u32,
-    },
-    Interrupted {
-        reason: InterruptionReason,
-    },
+    Completed { reason: CompletionReason },
+    Truncated { limit: TruncationLimit },
+    Failed { error: RunError, at_turn: u32 },
+    Interrupted { reason: InterruptionReason },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

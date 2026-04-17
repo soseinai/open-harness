@@ -28,10 +28,7 @@ pub async fn read_events(path: &Path) -> Result<Vec<Event>, TrajectoryError> {
 
 /// Stream events one at a time. Caller drives iteration; useful for tailing huge
 /// trajectory files.
-pub async fn read_events_streaming<F>(
-    path: &Path,
-    mut each: F,
-) -> Result<(), TrajectoryError>
+pub async fn read_events_streaming<F>(path: &Path, mut each: F) -> Result<(), TrajectoryError>
 where
     F: FnMut(Event) -> bool,
 {

@@ -1,7 +1,7 @@
 //! Message & content types (§4.2).
 
-use crate::MetadataMap;
 use crate::completion::StopReason;
+use crate::MetadataMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;

@@ -10,8 +10,8 @@ use oharness_llm::Llm;
 use oharness_memory::{MemoryPolicy, Passthrough};
 use oharness_tools::ToolSet;
 use oharness_trace::InMemorySink;
-use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 
 pub struct Agent {
     llm: Arc<dyn Llm>,

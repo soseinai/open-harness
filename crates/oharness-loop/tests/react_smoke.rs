@@ -15,8 +15,8 @@ use oharness_loop::{Agent, ReactLoop};
 use oharness_tools::fs::FsToolSet;
 use oharness_trace::InMemorySink;
 use serde_json::json;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 struct ScriptedLlm {
     responses: Vec<CompletionResponse>,
@@ -107,11 +107,23 @@ async fn scripted_tool_call_roundtrip() {
         "first event must be Meta"
     );
     // We should have run.started and run.finished bracketing.
-    assert!(events.iter().any(|e| matches!(e.kind, EventKind::RunStarted(_))));
-    assert!(events.iter().any(|e| matches!(e.kind, EventKind::RunFinished(_))));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e.kind, EventKind::RunStarted(_))));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e.kind, EventKind::RunFinished(_))));
     // At least one llm.request/response pair and at least one tool.call.started.
-    assert!(events.iter().any(|e| matches!(e.kind, EventKind::LlmRequest(_))));
-    assert!(events.iter().any(|e| matches!(e.kind, EventKind::LlmResponse(_))));
-    assert!(events.iter().any(|e| matches!(e.kind, EventKind::ToolCallStarted(_))));
-    assert!(events.iter().any(|e| matches!(e.kind, EventKind::ToolCallFinished(_))));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e.kind, EventKind::LlmRequest(_))));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e.kind, EventKind::LlmResponse(_))));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e.kind, EventKind::ToolCallStarted(_))));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e.kind, EventKind::ToolCallFinished(_))));
 }

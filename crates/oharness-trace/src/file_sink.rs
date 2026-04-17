@@ -14,7 +14,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc::{self, Sender, error::TrySendError};
+use tokio::sync::mpsc::{self, error::TrySendError, Sender};
 use tokio::task::JoinHandle;
 use tracing::warn;
 

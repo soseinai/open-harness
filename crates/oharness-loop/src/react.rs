@@ -12,13 +12,13 @@ use oharness_core::event::{
 };
 use oharness_core::{
     AgentError, BudgetRequest, CompletionRequest, CompletionResponse, Content, ConversationView,
-    MetadataMap, Message, ResourceUsage, RunError, RunErrorCategory, RunOutcome, StopReason,
-    Task, Termination, TrajectoryHandle, TruncationLimit,
+    Message, MetadataMap, ResourceUsage, RunError, RunErrorCategory, RunOutcome, StopReason, Task,
+    Termination, TrajectoryHandle, TruncationLimit,
 };
 use oharness_memory::policy::MemoryContext;
 use oharness_tools::context::ToolContext;
 use oharness_tools::toolset::ToolOutcome;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use time::OffsetDateTime;
 
 pub struct ReactLoop {
