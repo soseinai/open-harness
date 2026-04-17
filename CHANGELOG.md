@@ -32,6 +32,28 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **M1b-ε**: `ReplayLlm` replays a recorded trajectory as an `Llm`
+  implementation (plan §9.6). Two modes:
+  - `ReplayMode::Positional` (default): Nth live `complete()` / `stream()`
+    returns the Nth recorded response. No input comparison.
+  - `ReplayMode::Strict`: the incoming `CompletionRequest` must serialize
+    byte-for-byte identically to the recorded one. Mismatch emits a
+    `critic.failed`-shaped drift event (when a drift emitter is attached)
+    and `DriftPolicy` decides whether to continue with the recorded
+    response (`WarnAndContinue`, default) or surface an
+    `LlmError::Provider(ReplayDriftError)` (`Fail`).
+  Capabilities are read from the trajectory's `meta` event so
+  capability-gated middleware (e.g. the eventual `PromptCaching`) can
+  still wrap a `ReplayLlm` cleanly. `stream()` reconstructs `Chunk`s from
+  the `llm.stream.chunk` events that sat between successive recorded
+  `llm.request`s. Constructors: `from_events`, `from_path`, `from_handle`.
+  11 unit tests (positional + strict, capabilities, ran-off-end,
+  recorded-failure replay, drift-emitter wiring, stream reconstruction,
+  missing-meta rejection) and a full record-then-replay integration test
+  (`oharness-loop/tests/replay_roundtrip.rs`) that verifies a live
+  `ReactLoop` run's final messages, turn count, and tool-call count all
+  match when the same task is re-run against a `ReplayLlm` built from the
+  captured trajectory.
 - **M1b-δ**: tracing middleware + `ReactLoop` refactor. `oharness-trace`
   gains three types:
   - `RequestTracer` wraps `Arc<dyn Llm>`, implementing `Llm`. Emits
