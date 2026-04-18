@@ -10,6 +10,7 @@ members = [
     "crates/oharness-loop",
     "crates/oharness-budget",
     "crates/oharness-critic",
+    "crates/oharness-eval",
 ]
 
 [workspace.package]
@@ -38,6 +39,7 @@ oharness-trace = { path = "crates/oharness-trace", version = "0.1.0" }
 oharness-loop = { path = "crates/oharness-loop", version = "0.1.0" }
 oharness-budget = { path = "crates/oharness-budget", version = "0.1.0" }
 oharness-critic = { path = "crates/oharness-critic", version = "0.1.0" }
+oharness-eval = { path = "crates/oharness-eval", version = "0.1.0" }
 
 # Core
 serde = { version = "1", features = ["derive"] }

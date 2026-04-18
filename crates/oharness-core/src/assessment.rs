@@ -14,6 +14,7 @@ use crate::outcome::RunOutcome;
 use crate::task::Task;
 use crate::trajectory::TrajectoryHandle;
 use crate::MetadataMap;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -145,6 +146,17 @@ pub struct EvaluationResult {
     pub passed: bool,
     #[serde(default, skip_serializing_if = "MetadataMap::is_empty")]
     pub details: MetadataMap,
+}
+
+/// Scores a completed [`RunOutcome`] against the [`Task`] that produced
+/// it. Lives in core because it sits at the seam between the loop (which
+/// drives runs), the critic crate (which uses it for reflexion), and the
+/// eval crate (which drives benchmarks and aggregates across many
+/// outcomes). Keeping the trait central dodges a `loop → eval → loop`
+/// dependency cycle.
+#[async_trait]
+pub trait TaskEvaluator: Send + Sync {
+    async fn evaluate(&self, task: &Task, outcome: &RunOutcome) -> EvaluationResult;
 }
 
 impl EvaluationResult {

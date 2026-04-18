@@ -1,0 +1,38 @@
+[package]
+name = "oharness-eval"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Benchmark runner + TaskEvaluator re-export for open-harness"
+
+[lints]
+workspace = true
+
+[features]
+# Per plan §16.1: no default features on oharness-eval. Per-benchmark
+# features live on benchmark-adapter crates (oharness-bench-swe,
+# oharness-bench-tau, …) rather than here.
+default = []
+
+[dependencies]
+oharness-core = { workspace = true }
+oharness-loop = { workspace = true }
+oharness-tools = { workspace = true }
+oharness-trace = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+time = { workspace = true }
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
+oharness-llm = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

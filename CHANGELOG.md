@@ -32,6 +32,62 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **M2 part 3 — `oharness-eval` crate** (plan §13). Final slice of the
+  M2 trait surface: `TaskEvaluator` moves to `oharness-core` (so it
+  can be shared between the loop's `run_reflexion` and the benchmark
+  runner without a crate cycle); the new `oharness-eval` crate ships
+  the benchmark contract and a concurrent runner. SWE-bench-lite
+  lands in its own adapter crate (`oharness-bench-swe`) later — this
+  slice only ships the plumbing, plus an `InMemoryBenchmark` fixture
+  for tests.
+  New in `oharness-core`:
+  - `TaskEvaluator` trait (`async fn evaluate(&self, &Task,
+    &RunOutcome) -> EvaluationResult`). Previously duplicated as
+    `oharness-loop::ReflexionEvaluator`; that local trait is gone
+    and `run_reflexion` now takes `Arc<dyn TaskEvaluator>` directly.
+  New `oharness-eval` crate:
+  - `Benchmark` trait (`name`/`version`/`task_count`/`task_ids`/
+    `load_task`/`evaluator`) + `LoadedTask { task, workspace:
+    Option<Arc<Workspace>> }` + `BenchmarkError`. `Workspace` is
+    re-exported from `oharness-tools` rather than duplicated.
+  - `BenchmarkRunConfig` — `output_dir`, `run_concurrency` (default 8),
+    `load_concurrency` (default 4), `max_cost_usd`, `filter`
+    (substring), `sample_n` (prefix), `shard { index, total }`,
+    `resume`. Serde-serializable (snapshotted as `config.toml` in the
+    output dir). `select_ids(..)` helper composes filter → shard →
+    sample deterministically.
+  - `run_benchmark(benchmark, agent_factory, config)` — concurrent
+    runner using two separate `tokio::sync::Semaphore`s for
+    load vs run. Async factory (`Fn(&LoadedTask) ->
+    impl Future<Output = Result<Agent, AgentError>>`) per plan
+    §13.4. Load / factory / run errors surface as per-task
+    `TaskReport` entries with `error: Some(..)` rather than
+    aborting the whole run. Max-cost cutoff stops scheduling new
+    tasks once cumulative cost crosses the cap; in-flight tasks
+    finish. `resume` reads back outcomes from disk and folds them
+    into the returned `BenchmarkReport` so the return value always
+    reflects the full run.
+  - Results directory layout per plan §13.5:
+    `{output_dir}/config.toml`, `manifest.json`, and per task
+    `{task_id}/{outcome.json, trajectory.jsonl, evaluation.json}`.
+    `outcome.json` swaps the in-memory trajectory handle for a
+    file-backed one pointing at `trajectory.jsonl` before serializing
+    (in-memory handles refuse to serialize by design — plan §9.4).
+  - `BenchmarkReport` + `TaskReport` with `pass_at_1()` helper.
+  - `InMemoryBenchmark` + `AlwaysPassEvaluator` + `AlwaysFailEvaluator`
+    fixtures for tests, tutorials, and harness-on-harness smoke runs.
+  15 new tests: 10 unit (config knob composition, manifest
+  round-trip, id sanitization, pass_at_1 on mixed results) and 5
+  integration (runs every task and writes all artifacts, filter
+  limits scheduled tasks, sample_n takes prefix, resume skips
+  already-completed tasks without invoking the factory, factory
+  errors surface as skipped tasks with `factory:` prefix). 202
+  tests total on `--all-features` (was 187).
+
+  Still outstanding: SWE-bench-lite adapter crate (the actual M2
+  completion gate per plan §21.1) — that's its own piece of work
+  requiring HuggingFace dataset loading + per-task git workspace
+  staging.
 - **M2 part 2 — loop integration** (plan §12). Wires the critic +
   reflector trait surface from M2 part 1 into the ReactLoop and ships
   a `ConversationLoop` + `run_reflexion` helper. Loop integration is the

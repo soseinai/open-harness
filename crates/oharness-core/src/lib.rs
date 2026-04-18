@@ -15,7 +15,8 @@ pub mod trajectory;
 pub mod view;
 
 pub use assessment::{
-    AssistantTurn, Episode, EvaluationResult, OwnedEpisode, Reflection, ToolCall, TrajectoryView,
+    AssistantTurn, Episode, EvaluationResult, OwnedEpisode, Reflection, TaskEvaluator, ToolCall,
+    TrajectoryView,
 };
 pub use capabilities::LlmCapabilities;
 pub use completion::{

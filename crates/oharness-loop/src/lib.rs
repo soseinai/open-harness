@@ -33,6 +33,6 @@ pub use react::ReactLoop;
 pub use conversation::ConversationLoop;
 
 #[cfg(feature = "reflexion")]
-pub use reflexion::{run_reflexion, ReflexionEvaluator};
+pub use reflexion::run_reflexion;
 
 pub use oharness_core::AgentError;

@@ -2,22 +2,16 @@
 //! from a [`Reflector`] into the next episode via the agent's
 //! [`ReflectionInjector`]. Not a [`Loop`] impl itself (plan §12.2 /
 //! §12.6). Behind the `reflexion` feature.
+//!
+//! The evaluator is typed as [`oharness_core::TaskEvaluator`] — the
+//! same trait used by `oharness_eval::run_benchmark`. Any evaluator
+//! implementation round-trips freely between reflexion and benchmark
+//! runs.
 
 use crate::agent::Agent;
-use async_trait::async_trait;
-use oharness_core::{AgentError, Episode, EvaluationResult, OwnedEpisode, Reflection, Task};
+use oharness_core::{AgentError, Episode, OwnedEpisode, Reflection, Task, TaskEvaluator};
 use oharness_critic::Reflector;
 use std::sync::Arc;
-
-/// Pluggable evaluator used by `run_reflexion`. Lives here rather than
-/// in `oharness-core` because `oharness-eval` (its eventual home)
-/// doesn't exist yet. When `oharness-eval` lands, this trait will be
-/// re-exported from there and the shipped impls (e.g.
-/// `BenchmarkEvaluator`) will implement it directly.
-#[async_trait]
-pub trait ReflexionEvaluator: Send + Sync {
-    async fn evaluate(&self, task: &Task, outcome: &oharness_core::RunOutcome) -> EvaluationResult;
-}
 
 /// Run `max_episodes` attempts of the agent on `task`, threading
 /// reflections produced by `reflector` into subsequent episodes via
@@ -39,7 +33,7 @@ pub trait ReflexionEvaluator: Send + Sync {
 pub async fn run_reflexion(
     agent: &Agent,
     task: Task,
-    evaluator: Arc<dyn ReflexionEvaluator>,
+    evaluator: Arc<dyn TaskEvaluator>,
     reflector: Arc<dyn Reflector>,
     max_episodes: u32,
 ) -> Result<Vec<OwnedEpisode>, AgentError> {
@@ -125,8 +119,9 @@ mod tests {
     use crate::AgentBuilder;
     use async_trait::async_trait;
     use oharness_core::{
-        CompletionReason, CompletionResponse, Content, LlmCapabilities, MetadataMap, ModelId,
-        ResourceUsage, RunOutcome, StopReason, Task, Termination, TrajectoryHandle, Usage,
+        CompletionReason, CompletionResponse, Content, EvaluationResult, LlmCapabilities,
+        MetadataMap, ModelId, ResourceUsage, RunOutcome, StopReason, Task, Termination,
+        TrajectoryHandle, Usage,
     };
     use oharness_critic::{shipped::NullReflector, ReflectionInjector};
     use oharness_llm::{ChunkStream, CompletionRequest, Llm, LlmError};
@@ -173,7 +168,7 @@ mod tests {
 
     struct AlwaysPass;
     #[async_trait]
-    impl ReflexionEvaluator for AlwaysPass {
+    impl TaskEvaluator for AlwaysPass {
         async fn evaluate(&self, _: &Task, _: &RunOutcome) -> EvaluationResult {
             EvaluationResult::pass()
         }
@@ -181,7 +176,7 @@ mod tests {
 
     struct AlwaysFail;
     #[async_trait]
-    impl ReflexionEvaluator for AlwaysFail {
+    impl TaskEvaluator for AlwaysFail {
         async fn evaluate(&self, _: &Task, _: &RunOutcome) -> EvaluationResult {
             EvaluationResult::fail()
         }
