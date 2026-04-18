@@ -3,11 +3,13 @@
 Plan §14. Lets Python code plug `Llm` / `Critic` / `TaskEvaluator`
 implementations into Rust-side agent runs.
 
-> **Status: v1 scaffold.** The adapter pattern is complete; end-to-end
-> Python-driven agent runs, `async def` Python methods, and the
-> remaining traits (`ToolSet`, `MemoryPolicy`, `Reflector`,
-> `UserSimulator`, `RequestLayer` / `ResponseLayer`) land in
-> follow-up milestones per plan §14.2.
+> **Status: v1 — six adapters live.** `Llm`, `Critic`,
+> `TaskEvaluator`, `Reflector`, `UserSimulator`, and `MemoryPolicy`
+> all ship with their Python shim. End-to-end Python-driven agent
+> runs, `async def` Python methods, and the remaining traits
+> (`ToolSet`, `RequestLayer` / `ResponseLayer`,
+> `ChunkObserver` / `ChunkTransformer`) land in follow-up
+> milestones per plan §14.2.
 
 ## Build
 
@@ -41,11 +43,11 @@ Rust-side check opt-in.
 
 ## Adapter pattern
 
-Three adapter classes live on the Python side; each wraps a Python
-object implementing a single method. The wire type between Rust and
-Python is always a JSON-encoded string — deliberately not a structured
-`dict`, because serde on the Rust side already has the canonical
-codec.
+Six adapter classes live on the Python side; each wraps a Python
+object implementing a single method (or two, for `PyUserSimulator`).
+The wire type between Rust and Python is always a JSON-encoded
+string — deliberately not a structured `dict`, because serde on the
+Rust side already has the canonical codec.
 
 ### `PyLlm`
 
@@ -135,6 +137,111 @@ class ContainsHello:
 evaluator = oharness.PyTaskEvaluator(ContainsHello())
 ```
 
+### `PyReflector`
+
+```python
+import oharness
+import json
+
+class SummarizeLowScoreFailures:
+    def reflect(self, episode_json: str):
+        ep = json.loads(episode_json)
+        if ep["evaluation"]["passed"]:
+            return None           # no reflection on success
+        score = ep["evaluation"]["score"]
+        return json.dumps({
+            "text": f"Episode {ep['index']} failed (score={score:.2f}). "
+                    f"Last termination: {ep['outcome']['termination']}.",
+            "metadata": {"source": "py", "score": score},
+        })
+
+reflector = oharness.PyReflector(SummarizeLowScoreFailures(), name="low-score")
+```
+
+Notes:
+- Return `None` (or the literal string `"null"`) to emit no
+  reflection for the current episode.
+- The episode wire carries `task`, `outcome` (without the trajectory
+  handle — in-memory handles can't serialize, and file handles are
+  useless to Python), `evaluation`, `prior_reflections`, `index`.
+- `created_at` on the `Reflection` is stamped on the Rust side, so
+  Python only needs to supply `text` + optional `metadata`.
+- Errors (exception, malformed JSON) `eprintln!` and return `None` —
+  a broken reflector should not break the reflexion sweep.
+
+### `PyUserSimulator`
+
+```python
+import oharness
+import json
+
+class HelpfulUser:
+    def initial_message(self, task_json: str) -> str:
+        task = json.loads(task_json)
+        return task["instruction"]
+
+    def respond(self, conversation_json: str, task_json: str) -> str:
+        messages = json.loads(conversation_json)
+        last_assistant = next(
+            (m for m in reversed(messages) if m.get("role") == "assistant"),
+            None,
+        )
+        if last_assistant and any(
+            "done" in (b.get("text") or "").lower()
+            for b in last_assistant.get("content", [])
+            if b.get("type") == "text"
+        ):
+            return json.dumps({"action": "end_conversation"})
+        return json.dumps({"action": "say", "message": "keep going"})
+
+user = oharness.PyUserSimulator(HelpfulUser(), name="helpful")
+```
+
+Action wire shapes:
+
+```json
+{"action": "say", "message": "..."}
+{"action": "end_conversation"}
+```
+
+**Not fail-open.** Unlike critics, simulator errors are promoted to
+`UserError::Other`, which the `ConversationLoop` turns into
+`Termination::Failed { reason: "user_simulator_error" }`. Hiding
+simulator bugs behind a silent `EndConversation` would break eval
+reproducibility, so the loop refuses to do it.
+
+### `PyMemoryPolicy`
+
+```python
+import oharness
+import json
+
+class KeepLastN:
+    def __init__(self, n: int = 8):
+        self.n = n
+
+    def transform(self, conversation_json: str, ctx_json: str) -> str:
+        messages = json.loads(conversation_json)
+        # Preserve any leading system message + the last N non-system messages.
+        head = [m for m in messages[:1] if m.get("role") == "system"]
+        tail = [m for m in messages if m.get("role") != "system"][-self.n:]
+        return json.dumps(head + tail)
+
+policy = oharness.PyMemoryPolicy(KeepLastN(8), name="keep-last-8")
+```
+
+Notes:
+- `ctx_json` carries `{"token_budget": N}` and nothing else.
+- **Python memory policies cannot emit `memory.evicted` /
+  `memory.summarized` / `memory.retrieved` events** in v1 — the
+  `ScopedEmitter` doesn't cross the boundary. Future work may grow
+  a return-side `events` channel so Python policies can surface
+  telemetry.
+- Errors promote to `MemoryError::Configuration`, which the loop
+  treats as fatal for the turn. A broken memory policy must NOT
+  silently pass the raw conversation through — corrupted context
+  windows are worse than a failed run.
+
 ## What's next
 
 Plan §14.2 priority table:
@@ -144,9 +251,9 @@ Plan §14.2 priority table:
 | `Llm::complete`     | ✅ v1 |
 | `Critic::assess`    | ✅ v1 |
 | `TaskEvaluator::evaluate` | ✅ v1 |
-| `Reflector`         | ⏳ v1 |
-| `UserSimulator`     | ⏳ v1 |
-| `MemoryPolicy`      | ⏳ v1 |
+| `Reflector::reflect` | ✅ v1 |
+| `UserSimulator`     | ✅ v1 |
+| `MemoryPolicy::transform` | ✅ v1 |
 | `Llm::stream`       | ⏳ v1.2+ |
 | `ToolSet`           | ⏳ v1.1 |
 | `RequestLayer` / `ResponseLayer` | ⏳ v1.1 |

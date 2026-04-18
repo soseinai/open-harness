@@ -11,6 +11,60 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 ## [Unreleased]
 
 ### Added
+- **M3 part 2: `oharness-py` adapters for Reflector / UserSimulator /
+  MemoryPolicy** (plan §14.2). Three more traits join the v1
+  adapter surface; the JSON-wire + `tokio::task::spawn_blocking`
+  pattern from part 1 carries over verbatim.
+  - `PyReflector(callable, name=...)` — expects `reflect(episode_json:
+    str) -> Optional[str]`. Python returns `None` (or the literal
+    `"null"`) to skip the episode, or a JSON `{"text", "metadata"}`
+    to emit a [`Reflection`]. `created_at` is stamped on the Rust
+    side so Python authors don't have to emit valid RFC-3339. Errors
+    `eprintln!` and return `None` — a broken reflector must not
+    break the reflexion sweep.
+  - `EpisodeWire`: the episode passed into Python is a trimmed view
+    carrying `index`, `task`, `outcome` (without the
+    `TrajectoryHandle` — in-memory handles refuse to serialize, and
+    file handles are useless to Python anyway), `evaluation`,
+    `prior_reflections`. `OutcomeWire` keeps `run_id`, `task_id`,
+    `termination`, `final_messages`, `usage`.
+  - `PyUserSimulator(callable, name=...)` — two methods, one per
+    trait entry point:
+    - `initial_message(task_json: str) -> str` — bare string, the
+      first user turn.
+    - `respond(conversation_json: str, task_json: str) -> str` —
+      returns `{"action": "say", "message": "..."}` or
+      `{"action": "end_conversation"}`.
+    - **Not fail-open**: simulator errors promote to
+      `UserError::Other`, which the `ConversationLoop` turns into
+      `Termination::Failed { reason: "user_simulator_error" }`.
+      Unlike critics, hiding simulator bugs behind a silent
+      `EndConversation` would break eval reproducibility.
+  - `PyMemoryPolicy(callable, name=...)` — expects
+    `transform(conversation_json: str, ctx_json: str) -> str`
+    returning a JSON `Vec<Message>`. The `ctx_json` carries only
+    `{"token_budget": N}` — **Python memory policies cannot emit
+    `memory.*` events in v1** (the `ScopedEmitter` doesn't cross the
+    boundary). Documented as a known limitation; future work may
+    grow a return-side events channel. Errors promote to
+    `MemoryError::Configuration` (treated as fatal for the turn) —
+    a corrupted context window is worse than a failed run.
+  - `oharness-py/Cargo.toml` gains `oharness-memory` + `oharness-loop`
+    as path deps (for the trait definitions only — no runners
+    linked).
+  - `#[pymodule]` registers `PyReflector`, `PyUserSimulator`,
+    `PyMemoryPolicy` alongside the originals. `__version__` still
+    tracks crate version.
+  - `README.md` grows usage examples for each of the three new
+    adapters and the v1 scope table flips the three from `⏳` to
+    `✅`. Remaining deferred per plan §14.2: `Llm::stream`
+    (v1.2+), `ToolSet` (v1.1), `Request/ResponseLayer` (v1.1),
+    `ChunkObserver`/`ChunkTransformer` (discouraged by per-chunk
+    GIL cost).
+  230 workspace tests on `--all-features` still green — the
+  bindings ship no tests yet (a Python interpreter is required to
+  meaningfully exercise them; that's a future task once a
+  pytest-based harness lands).
 - **M3 part 1: `oharness-py` Python bindings scaffold** (plan §14). A
   new crate at `crates/oharness-py/` ships the adapter pattern that
   lets Python code plug into Rust-side agent runs. Imported as

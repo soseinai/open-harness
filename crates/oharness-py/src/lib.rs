@@ -1,29 +1,32 @@
 //! Python bindings for open-harness (plan §14).
 //!
-//! Exposes three wrapper types that let Python users plug their own
-//! `Llm` / `Critic` / `TaskEvaluator` implementations into Rust-side
-//! agent runs:
+//! Exposes wrapper types that let Python users plug their own trait
+//! implementations into Rust-side agent runs:
 //!
-//! - [`PyLlm`]   — `complete(req_json: str) -> str`
-//! - [`PyCritic` ] — `assess(ctx_json: str) -> str`
-//! - [`PyTaskEvaluator`] — `evaluate(task_json: str, outcome_json: str) -> str`
+//! - [`PyLlm`]            — `complete(req_json: str) -> str`
+//! - [`PyCritic`]         — `assess(ctx_json: str) -> str`
+//! - [`PyTaskEvaluator`]  — `evaluate(task_json: str, outcome_json: str) -> str`
+//! - [`PyReflector`]      — `reflect(episode_json: str) -> Optional[str]`
+//! - [`PyUserSimulator`]  — `initial_message(task_json: str) -> str`
+//!   plus `respond(conversation_json: str, task_json: str) -> str`
+//! - [`PyMemoryPolicy`]   — `transform(conversation_json: str, ctx_json: str) -> str`
 //!
 //! All wire types cross the Rust↔Python boundary as JSON-encoded
 //! strings. The Python side implements a duck-typed class with the
-//! named method; the Rust side serializes arguments with serde, calls
-//! the Python method under the GIL (wrapped in
+//! named method(s); the Rust side serializes arguments with serde,
+//! calls the Python method under the GIL (wrapped in
 //! `tokio::task::spawn_blocking` so the async runtime stays
 //! responsive), and deserializes the returned string.
 //!
 //! ## v1 scope vs. later (plan §14.2)
 //!
 //! v1 (this crate, as it ships now): `Llm::complete`, `Critic::assess`,
-//! `TaskEvaluator::evaluate`. Sync Python side (async Python is v1.1).
+//! `TaskEvaluator::evaluate`, `Reflector::reflect`, `UserSimulator`,
+//! `MemoryPolicy::transform`. Sync Python side (async Python is v1.1).
 //!
-//! Deferred: `Llm::stream`, `ToolSet`, `MemoryPolicy`, `Reflector`,
-//! `UserSimulator`, `RequestLayer` / `ResponseLayer`, `ChunkObserver` /
-//! `ChunkTransformer`. Each follows the same adapter pattern when it
-//! lands — the scaffold here is the template.
+//! Deferred: `Llm::stream`, `ToolSet`, `RequestLayer` / `ResponseLayer`,
+//! `ChunkObserver` / `ChunkTransformer`. Each follows the same adapter
+//! pattern when it lands — the scaffolds here are the template.
 //!
 //! ## Build
 //!
@@ -52,11 +55,13 @@
 
 use async_trait::async_trait;
 use oharness_core::{
-    CompletionRequest, CompletionResponse, EvaluationResult, LlmCapabilities, RunOutcome, Task,
-    TaskEvaluator,
+    CompletionRequest, CompletionResponse, ConversationView, Episode, EvaluationResult,
+    LlmCapabilities, Message, Reflection, RunOutcome, Task, TaskEvaluator,
 };
-use oharness_critic::{AssessmentContext, Critic, CriticVerdict};
+use oharness_critic::{AssessmentContext, Critic, CriticVerdict, Reflector};
 use oharness_llm::{ChunkStream, Llm, LlmError};
+use oharness_loop::{UserAction, UserError, UserSimulator};
+use oharness_memory::{MemoryContext, MemoryError, MemoryPolicy};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use serde::Serialize;
@@ -337,7 +342,383 @@ fn eval_error(msg: &str) -> EvaluationResult {
 }
 
 // ======================================================================
-// Error helpers shared across the three adapters
+// PyReflector — wraps a Python `Reflector`-like object.
+// ======================================================================
+
+/// Rust handle to a Python `Reflector` implementation. Calls the Python
+/// object's `reflect(episode_json: str) -> Optional[str]` method. The
+/// episode is serialized as a compact view (task / outcome summary /
+/// evaluation / prior reflections) — notably *without* the trajectory
+/// handle, since in-memory `TrajectoryHandle`s refuse to serialize and
+/// file-backed ones would need Python to re-read the JSONL anyway.
+///
+/// Python should return one of:
+/// - `None` — no reflection emitted this episode.
+/// - a JSON string `"null"` — same as `None`.
+/// - a JSON string `{"text": "...", "metadata": {...}}` — produces a
+///   [`Reflection`] with the given text + optional metadata.
+///
+/// Any error on the Python side (exception, malformed JSON, bad
+/// shape) logs via `eprintln!` and returns `None` — consistent with
+/// the reflector contract that a bad reflector shouldn't break the
+/// reflexion sweep.
+#[pyclass]
+pub struct PyReflector {
+    py_obj: PyObject,
+    name: String,
+}
+
+#[pymethods]
+impl PyReflector {
+    #[new]
+    #[pyo3(signature = (py_obj, name = "python-reflector".to_string()))]
+    fn new(py_obj: PyObject, name: String) -> Self {
+        Self { py_obj, name }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("PyReflector(name={:?})", self.name)
+    }
+}
+
+/// Wire shape for the episode passed into Python. Flattens the
+/// borrowed [`Episode`] fields into an owned, serde-friendly view. The
+/// `outcome` field is a trimmed [`RunOutcome`] mirror that omits the
+/// `trajectory` handle — in-memory handles refuse to serialize (they'd
+/// blow up the call), and reflectors written in Python don't have a
+/// good way to consume a file path anyway.
+#[derive(Serialize)]
+struct EpisodeWire<'a> {
+    index: u32,
+    task: &'a Task,
+    outcome: OutcomeWire<'a>,
+    evaluation: &'a EvaluationResult,
+    prior_reflections: &'a [Reflection],
+}
+
+#[derive(Serialize)]
+struct OutcomeWire<'a> {
+    run_id: oharness_core::RunId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_id: Option<&'a String>,
+    termination: &'a oharness_core::Termination,
+    final_messages: &'a [Message],
+    usage: &'a oharness_core::ResourceUsage,
+}
+
+impl<'a> From<&'a RunOutcome> for OutcomeWire<'a> {
+    fn from(o: &'a RunOutcome) -> Self {
+        Self {
+            run_id: o.run_id,
+            task_id: o.task_id.as_ref(),
+            termination: &o.termination,
+            final_messages: &o.final_messages,
+            usage: &o.usage,
+        }
+    }
+}
+
+/// Optional Python-side return payload — `{"text", "metadata"}`. The
+/// full `Reflection` (including `created_at`) is reconstructed on the
+/// Rust side so Python authors don't have to emit valid RFC-3339.
+#[derive(serde::Deserialize)]
+struct WireReflection {
+    text: String,
+    #[serde(default)]
+    metadata: oharness_core::MetadataMap,
+}
+
+#[async_trait]
+impl Reflector for PyReflector {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn reflect(&self, episode: &Episode<'_>) -> Option<Reflection> {
+        let wire = EpisodeWire {
+            index: episode.index,
+            task: episode.task,
+            outcome: episode.outcome.into(),
+            evaluation: episode.evaluation,
+            prior_reflections: episode.prior_reflections,
+        };
+        let episode_json = match serde_json::to_string(&wire) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("PyReflector({}): encode episode: {e}", self.name);
+                return None;
+            }
+        };
+
+        let py_obj = self.py_obj.clone_ref_unbound_gil();
+        let result_res =
+            tokio::task::spawn_blocking(move || -> Result<Option<String>, PyBridgeError> {
+                Python::with_gil(|py| {
+                    let out = py_obj
+                        .call_method1(py, "reflect", (episode_json,))
+                        .map_err(|e| PyBridgeError::PythonCall(format!("{e}")))?;
+                    // Accept either a str or None. `extract::<Option<String>>`
+                    // happily handles both.
+                    out.extract::<Option<String>>(py)
+                        .map_err(|e| PyBridgeError::PythonCall(format!("extract: {e}")))
+                })
+            })
+            .await;
+
+        let maybe_json = match result_res {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
+                eprintln!("PyReflector({}): {e}", self.name);
+                return None;
+            }
+            Err(e) => {
+                eprintln!("PyReflector({}): join error: {e}", self.name);
+                return None;
+            }
+        };
+
+        let json_str = match maybe_json {
+            Some(s) => s,
+            None => return None,
+        };
+        // A literal `"null"` return also means None — symmetric with
+        // the Python-None case, so authors can be sloppy about which
+        // they emit.
+        if json_str.trim() == "null" {
+            return None;
+        }
+
+        match serde_json::from_str::<WireReflection>(&json_str) {
+            Ok(w) => {
+                let mut r = Reflection::new(w.text);
+                r.metadata = w.metadata;
+                Some(r)
+            }
+            Err(e) => {
+                eprintln!(
+                    "PyReflector({}): decode reflection: {e} (raw: {json_str})",
+                    self.name
+                );
+                None
+            }
+        }
+    }
+}
+
+// ======================================================================
+// PyUserSimulator — wraps a Python `UserSimulator`-like object.
+// ======================================================================
+
+/// Rust handle to a Python `UserSimulator` implementation. Calls two
+/// Python methods:
+///
+/// - `initial_message(task_json: str) -> str` — returns the first user
+///   message as a bare string.
+/// - `respond(conversation_json: str, task_json: str) -> str` — returns
+///   a JSON-encoded next-action.
+///
+/// Action wire shapes:
+///
+/// ```json
+/// {"action": "say", "message": "..."}
+/// {"action": "end_conversation"}
+/// ```
+///
+/// Any Python exception or JSON shape error is promoted to a
+/// `UserError::Other` — the `ConversationLoop` then terminates with
+/// `Termination::Failed { reason: "user_simulator_error" }`. Simulators
+/// intentionally do NOT fail-open (unlike critics): hiding simulator
+/// bugs behind `EndConversation` would break eval reproducibility.
+#[pyclass]
+pub struct PyUserSimulator {
+    py_obj: PyObject,
+    name: String,
+}
+
+#[pymethods]
+impl PyUserSimulator {
+    #[new]
+    #[pyo3(signature = (py_obj, name = "python-user".to_string()))]
+    fn new(py_obj: PyObject, name: String) -> Self {
+        Self { py_obj, name }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("PyUserSimulator(name={:?})", self.name)
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+enum WireUserAction {
+    Say { message: String },
+    EndConversation,
+}
+
+#[async_trait]
+impl UserSimulator for PyUserSimulator {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn initial_message(&self, task: &Task) -> Result<String, UserError> {
+        let task_json =
+            serde_json::to_string(task).map_err(|e| UserError::Other(format!("encode task: {e}")))?;
+        let py_obj = self.py_obj.clone_ref_unbound_gil();
+        let res = tokio::task::spawn_blocking(move || -> Result<String, PyBridgeError> {
+            Python::with_gil(|py| {
+                let out = py_obj
+                    .call_method1(py, "initial_message", (task_json,))
+                    .map_err(|e| PyBridgeError::PythonCall(format!("{e}")))?;
+                out.extract::<String>(py)
+                    .map_err(|e| PyBridgeError::PythonCall(format!("extract str: {e}")))
+            })
+        })
+        .await;
+
+        match res {
+            Ok(Ok(s)) => Ok(s),
+            Ok(Err(e)) => Err(UserError::Other(e.to_string())),
+            Err(e) => Err(UserError::Other(format!("join: {e}"))),
+        }
+    }
+
+    async fn respond(
+        &self,
+        conversation: ConversationView<'_>,
+        task: &Task,
+    ) -> Result<UserAction, UserError> {
+        let conv_json = serde_json::to_string(conversation.messages())
+            .map_err(|e| UserError::Other(format!("encode conversation: {e}")))?;
+        let task_json =
+            serde_json::to_string(task).map_err(|e| UserError::Other(format!("encode task: {e}")))?;
+
+        let py_obj = self.py_obj.clone_ref_unbound_gil();
+        let res = tokio::task::spawn_blocking(move || -> Result<String, PyBridgeError> {
+            Python::with_gil(|py| {
+                let out = py_obj
+                    .call_method1(py, "respond", (conv_json, task_json))
+                    .map_err(|e| PyBridgeError::PythonCall(format!("{e}")))?;
+                out.extract::<String>(py)
+                    .map_err(|e| PyBridgeError::PythonCall(format!("extract str: {e}")))
+            })
+        })
+        .await;
+
+        let action_json = match res {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => return Err(UserError::Other(e.to_string())),
+            Err(e) => return Err(UserError::Other(format!("join: {e}"))),
+        };
+
+        let wire: WireUserAction = serde_json::from_str(&action_json).map_err(|e| {
+            UserError::Other(format!(
+                "decode UserAction: {e} (raw: {action_json})"
+            ))
+        })?;
+        Ok(match wire {
+            WireUserAction::Say { message } => UserAction::Say(message),
+            WireUserAction::EndConversation => UserAction::EndConversation,
+        })
+    }
+}
+
+// ======================================================================
+// PyMemoryPolicy — wraps a Python `MemoryPolicy`-like object.
+// ======================================================================
+
+/// Rust handle to a Python `MemoryPolicy` implementation. Calls
+/// `transform(conversation_json: str, ctx_json: str) -> str`; the
+/// returned string is a JSON array of [`Message`] — the transformed
+/// conversation the LLM will see on the next turn.
+///
+/// The `ctx` wire carries only `token_budget` — the `ScopedEmitter`
+/// doesn't cross the boundary, so **Python memory policies cannot
+/// emit `memory.evicted` / `memory.summarized` / `memory.retrieved`
+/// events**. This is a documented v1 limitation; future work may grow
+/// a return-side "events" channel so Python policies can surface
+/// telemetry.
+///
+/// Any error on the Python side is promoted to
+/// `MemoryError::Configuration`, which the loop treats as fatal for
+/// the turn — unlike critics, a broken memory policy must not
+/// silently pass the raw conversation through.
+#[pyclass]
+pub struct PyMemoryPolicy {
+    py_obj: PyObject,
+    name: String,
+}
+
+#[pymethods]
+impl PyMemoryPolicy {
+    #[new]
+    #[pyo3(signature = (py_obj, name = "python-memory".to_string()))]
+    fn new(py_obj: PyObject, name: String) -> Self {
+        Self { py_obj, name }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("PyMemoryPolicy(name={:?})", self.name)
+    }
+}
+
+#[derive(Serialize)]
+struct MemoryContextWire {
+    token_budget: u32,
+}
+
+#[async_trait]
+impl MemoryPolicy for PyMemoryPolicy {
+    async fn transform(
+        &self,
+        conversation: ConversationView<'_>,
+        ctx: &MemoryContext,
+    ) -> Result<Vec<Message>, MemoryError> {
+        let conv_json = serde_json::to_string(conversation.messages()).map_err(|e| {
+            MemoryError::Configuration(format!("encode conversation: {e}"))
+        })?;
+        let ctx_json = serde_json::to_string(&MemoryContextWire {
+            token_budget: ctx.token_budget,
+        })
+        .map_err(|e| MemoryError::Configuration(format!("encode ctx: {e}")))?;
+
+        let name = self.name.clone();
+        let py_obj = self.py_obj.clone_ref_unbound_gil();
+        let res = tokio::task::spawn_blocking(move || -> Result<String, PyBridgeError> {
+            Python::with_gil(|py| {
+                let out = py_obj
+                    .call_method1(py, "transform", (conv_json, ctx_json))
+                    .map_err(|e| PyBridgeError::PythonCall(format!("{e}")))?;
+                out.extract::<String>(py)
+                    .map_err(|e| PyBridgeError::PythonCall(format!("extract str: {e}")))
+            })
+        })
+        .await;
+
+        let messages_json = match res {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
+                return Err(MemoryError::Configuration(format!(
+                    "PyMemoryPolicy({name}): {e}"
+                )))
+            }
+            Err(e) => {
+                return Err(MemoryError::Configuration(format!(
+                    "PyMemoryPolicy({name}): join: {e}"
+                )))
+            }
+        };
+
+        serde_json::from_str::<Vec<Message>>(&messages_json).map_err(|e| {
+            MemoryError::Configuration(format!(
+                "PyMemoryPolicy({name}): decode Vec<Message>: {e} (raw: {messages_json})"
+            ))
+        })
+    }
+}
+
+// ======================================================================
+// Error helpers shared across the adapters
 // ======================================================================
 
 #[derive(Debug, thiserror::Error)]
@@ -381,6 +762,9 @@ fn oharness(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLlm>()?;
     m.add_class::<PyCritic>()?;
     m.add_class::<PyTaskEvaluator>()?;
+    m.add_class::<PyReflector>()?;
+    m.add_class::<PyUserSimulator>()?;
+    m.add_class::<PyMemoryPolicy>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

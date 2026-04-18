@@ -25,6 +25,11 @@ pyo3 = { version = "0.24", features = ["abi3-py310", "extension-module"] }
 oharness-core = { path = "../oharness-core" }
 oharness-llm = { path = "../oharness-llm" }
 oharness-critic = { path = "../oharness-critic" }
+oharness-memory = { path = "../oharness-memory" }
+# `oharness-loop` brings in `UserSimulator` / `UserAction` / `UserError`.
+# Default features are fine — we don't link any loop runners here, just
+# the trait definitions.
+oharness-loop = { path = "../oharness-loop" }
 
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
