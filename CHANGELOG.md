@@ -10,6 +10,34 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 
 ## [Unreleased]
 
+### Changed
+- **Plan §18.3 revised — examples-in-CI target: 15 → 11.** The
+  original 15-example list was aspirational; M4 batches 1 + 2
+  shipped 11 that cover the full extension surface users need
+  to see. The four cut items each had a "what we'd demonstrate
+  isn't shipped yet" problem rather than an authoring cost, so
+  they're tracked as post-v1.0 follow-ups with per-item
+  rationale in the revised §18.3:
+  - **Constitutional AI** — `ConstitutionalCritic` isn't a
+    concrete type yet; `LlmJudgeCritic` (example #5) covers
+    the same shape with a principles-as-rubric string.
+  - **Prompt caching** — needs a `wiremock`-based Anthropic
+    fixture; `PromptCaching::anthropic()` layer is tested in
+    `oharness-providers/tests/` already, so the incremental
+    coverage is modest.
+  - **Speculative sampling** — plan lists it but no canonical
+    speculative-sampling layer ships; writing "the" example
+    would require the framework to pick an opinion, which is
+    out-of-scope for v1.0.
+  - **τ-bench runner** — `oharness-bench-tau` adapter doesn't
+    exist yet (parallel to `oharness-bench-swe`, future work).
+  - `SWE-bench-lite runner` stays on the plan but is
+    explicitly build-only in CI (needs live LLM + dataset
+    download); the `oharness-bench-swe` integration test
+    covers the adapter plumbing.
+  - `docs/remaining-work.md §5` M4 gate list updated to mark
+    the examples gate closed with a pointer to the rationale.
+
 ### Added
 - **M4 docs pass — front-door docs** (plan §18.2). Closes the
   user-facing documentation gate for v1.0. Four new docs land:

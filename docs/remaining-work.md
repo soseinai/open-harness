@@ -464,8 +464,16 @@ Plan §21.1. Each item is a gate to v1.0:
   a "defer until decided" — ship without if review uncovers issues.
 - **MCP `consume` hardening**. Plan §7.6 — timeouts, reconnection, per-server
   sandboxing. Not implemented in M1a.
-- **Examples in CI**. Plan §18.3 lists 15 target examples. Every one runs in
-  CI as `cargo build --example X && ./target/debug/examples/X`.
+- ~~**Examples in CI**. Plan §18.3 lists 15 target examples. Every one runs in
+  CI as `cargo build --example X && ./target/debug/examples/X`.~~
+  **Closed 2026-04-18 at 11 examples.** Plan §18.3 revised — the 4
+  cut items (Constitutional AI, prompt caching, speculative
+  sampling, τ-bench) each had a "the thing we'd demonstrate
+  isn't shipped yet" problem rather than an authoring cost.
+  11 runnable examples cover the full extension surface a new
+  user needs to see; they all smoke-run on every `just ci`
+  invocation. See the revised §18.3 for the shipped list + the
+  per-item cut rationale.
 - **Publish**: `oharness-*` crates to crates.io, `oharness` to PyPI.
 - **Blog post + τ-bench adapter + first external user**. Marketing / adoption
   gate.

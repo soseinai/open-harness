@@ -1726,22 +1726,79 @@ Tests that read trajectories from prior minor versions and verify they still loa
 
 ### 18.3 Examples directory
 
-Minimum 15 runnable examples covering:
-- Hello world (10 lines)
-- ReAct with tool use
-- Self-refine (critic)
-- Reflexion (evaluator + reflector)
-- Constitutional AI
-- Prompt caching
-- Budget enforcement
-- Replay a trajectory
-- Custom middleware (RequestLayer, ResponseLayer, FullLayer, ChunkTransformer)
-- Custom critic
-- Custom memory policy
-- Multi-agent conversation
-- Speculative sampling (full-control middleware)
-- SWE-bench-lite runner
-- τ-bench runner
+**Revised 2026-04-18**: the original target was 15 runnable
+examples. M4 batches 1 + 2 shipped 11. The four remaining entries
+are deferred out of the v1.0 gate — they each have a
+shape-of-example problem rather than a "just write the file"
+cost. Revised target: **11 runnable + 0 aspirational in CI**, with
+the cut items tracked as post-v1.0 work below.
+
+#### Shipped (11, all CI-smoke-run via `just examples`)
+
+Each lives in `crates/oharness-loop/examples/` and runs against
+a scripted `Llm` so CI has no API-key dependency. `cargo run
+--example <name> -p oharness-loop` for any of them; three use
+a feature gate (`--features reflexion` / `--features
+conversation` / `--features llm-judge`).
+
+| # | Example                      | Covers                                                    |
+|---|------------------------------|-----------------------------------------------------------|
+| 1 | `hello_scripted`             | Minimum viable agent (one turn, no tools)                 |
+| 2 | `react_with_tools`           | Multi-turn ReAct with real `FsToolSet` tool dispatch      |
+| 3 | `custom_critic`              | Implement `Critic` from scratch; `Reject` verdict         |
+| 4 | `self_refine`                | Critic `Revise` verdict → in-place turn rewrite           |
+| 5 | `llm_judge_critic`           | Shipped `LlmJudgeCritic` + SCORE-based threshold          |
+| 6 | `budget_enforcement`         | `BudgetMiddleware` + tight token cap                      |
+| 7 | `custom_middleware`          | `RequestLayer` + `ResponseLayer` + `FullLayer` composed   |
+| 8 | `custom_memory_policy`       | Implement `MemoryPolicy` from scratch (keep-last-N)       |
+| 9 | `replay_trajectory`          | Record to JSONL → `ReplayLlm` round-trip                  |
+|10 | `reflexion_run`              | `run_reflexion` with a `NudgeReflector` over 3 episodes   |
+|11 | `multi_agent_conversation`   | `ConversationLoop` + `ScriptedUserSimulator`              |
+
+#### Deferred from v1.0 (rationale per item)
+
+The four items below were in the original 15-target list but cut
+from the v1.0 examples-in-CI gate. Each is tracked as an
+individual follow-up; none is a blocker for the release.
+
+- **Constitutional AI** — cut because `ConstitutionalCritic`
+  isn't shipped as a concrete critic. `LlmJudgeCritic` with a
+  principles-as-rubric string is the same shape and is
+  already covered by example #5. A proper
+  `ConstitutionalCritic` type is a future addition to
+  `oharness-critic/src/shipped/`, at which point this example
+  is straightforward.
+- **Prompt caching** — cut because the shipped
+  `PromptCaching::anthropic()` layer needs a live (or mocked)
+  Anthropic HTTP endpoint to demonstrate. The layer itself is
+  tested in `oharness-providers/tests/`; a runnable example
+  would need a `wiremock` fixture that reproduces Anthropic's
+  cache-control echo shape. Worth adding as a batch-3 example
+  later, but the incremental coverage over the existing unit
+  tests is modest.
+- **Speculative sampling** — cut because the plan lists it
+  but doesn't ship a canonical speculative-sampling layer.
+  The technique sits in `FullLayer` territory and user-land
+  middleware can implement it using the shipped
+  composition surface; a framework-side example would need
+  us to define "the" speculative-sampling layer, which is
+  out-of-scope opinion for v1.0.
+- **τ-bench runner** — cut because the `oharness-bench-tau`
+  crate doesn't exist yet (it's listed in the plan as a
+  future adapter, parallel to `oharness-bench-swe`). Writing
+  the example before the adapter would be backwards; this
+  gets revisited when a τ-bench adapter lands.
+
+#### SWE-bench runner (not cut, but build-only)
+
+The SWE-bench end-to-end runner is NOT in the examples CI smoke
+set — it needs a live LLM plus a downloaded dataset dump, so it
+can't run without API keys and network. The `oharness-bench-swe`
+crate's integration test (`tests/e2e.rs`) exercises the full
+adapter plumbing against a synthetic local git repo + `cat` as
+the test command, which is the right shape for CI. A
+live-endpoint example will land alongside the M2 gate eval
+campaign.
 
 ### 18.4 Paper-supplement template
 
