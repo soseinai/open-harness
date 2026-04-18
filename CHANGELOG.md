@@ -32,6 +32,38 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **M4 plumbing part 1**: schema-compat test, first example, pricing
+  docs. Three of the M4 gates land in this commit; JSON-Schema export
+  via `schemars`, examples-in-CI at the 15-file scale, and crates.io
+  publish prep are separate chunks.
+  - `crates/oharness-core/testdata/trajectories/v1.0/smoke.jsonl` —
+    an authoritative v1.0 trajectory fixture with 11 events covering
+    `meta`, `run.{started,finished}`, `turn.{started,finished}`,
+    `llm.{request,response,failed}`, and
+    `tool.call.{started,finished}`. Generated via
+    `crates/oharness-core/examples/gen_v1_fixture.rs` (the generator
+    stays in-tree as documentation for how to rebuild the baseline
+    if v1.0 ever legitimately needs regeneration).
+  - `crates/oharness-core/tests/v1_compat.rs` — 6 tests that load
+    the fixture and verify shape invariants (deserializes cleanly,
+    starts with `meta`, carries expected `EventKind` variants, seqs
+    are monotonic, one shared `run_id`, all events declare schema
+    v1.0). Per plan §17.4 this is the lower bound: prior-version
+    fixtures MUST continue to parse when the schema bumps to v1.1 /
+    v2.0.
+  - `crates/oharness-loop/examples/hello_scripted.rs` — the "first
+    agent in 10 lines" entry-point example. Scripted LLM + FsToolSet
+    + default ReactLoop; no real API, no cost. Prints termination +
+    final assistant message.
+  - `just examples` target added; `just ci` now builds `--examples`
+    across the workspace and smoke-runs the safe ones (today just
+    `hello_scripted`; the fixture generator is built-but-not-run so
+    CI doesn't rewrite the committed testdata).
+  - `docs/pricing.md` documents the three paths for updating
+    `BudgetMiddleware` pricing without a library bump —
+    `with_pricing(..)` at runtime, `PricingTable::load_from(path)`
+    via JSON file, or a PR against `PricingTable::builtin()`.
+  229 tests total on `--all-features` (was 223; +6 compat).
 - **Workspace scoping through the loop** — the shipped `FsToolSet` and
   `BashTool` were already workspace-scoped, but the loop was
   hardcoding `ToolContext.workspace` to `None` on every tool call, so

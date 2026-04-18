@@ -3,8 +3,8 @@
 
 default: ci
 
-# Lint, format-check, and test the whole workspace.
-ci: fmt-check clippy test
+# Lint, format-check, test, and smoke-run examples across the whole workspace.
+ci: fmt-check clippy test examples
 
 # Fail if any file isn't rustfmt-clean.
 fmt-check:
@@ -25,3 +25,12 @@ test:
 # Build the workspace (dev profile).
 build:
     cargo build --workspace
+
+# Smoke-run the example binaries that are safe to invoke in CI (no
+# network, no disk-dirtying side effects). Tool-style examples like
+# `gen_v1_fixture` are built-but-not-run — they mutate on-disk
+# fixtures and are only run manually when the schema legitimately
+# changes.
+examples:
+    cargo build --workspace --examples
+    cargo run -p oharness-loop --example hello_scripted
