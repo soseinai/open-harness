@@ -10,6 +10,82 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 
 ## [Unreleased]
 
+### Added
+- **M4 examples-in-CI batch 2** (plan §18.3 / remaining-work §5).
+  Five more runnable examples in
+  `crates/oharness-loop/examples/`, each smoke-run in `just ci`
+  via the `just examples` recipe. Example count now **11 of 15**
+  per plan §18.3; the remaining four (`prompt_caching`,
+  `speculative_sampling`, `swe_bench_runner`, `tau_bench_runner`)
+  need either a mocked Anthropic HTTP endpoint, a yet-unwritten
+  crate, or a live-LLM eval campaign — less mechanical than the
+  rest.
+  - **`self_refine`** — a `ProofreadHedges` critic emits
+    `CriticVerdict::Revise { replacement, reason }` when it
+    detects hedge phrases in an assistant turn. The loop swaps
+    the assistant message in place, emits `critic.revised` +
+    `turn.revised` events, and continues — no LLM re-dispatch.
+    Shows the in-place-revision path that's distinct from
+    `Reject` (terminates) and from middleware-driven retries
+    (re-hits the model). Default `revision_depth_cap = 3`.
+  - **`llm_judge_critic`** — wraps the shipped
+    `oharness_critic::shipped::LlmJudgeCritic`. A scripted judge
+    LLM returns `SCORE: 0.87`, the critic compares against a
+    0.75 threshold, and emits `AcceptWithNote`. Feature-gated
+    behind `oharness-loop/llm-judge` (forwards to
+    `oharness-critic/llm-judge`) so the default build stays
+    small. The `ConstitutionalCritic` the plan §11.6 mentions is
+    deferred library-side; `LlmJudgeCritic` with a
+    principles-as-rubric string is the same shape and available
+    today.
+  - **`custom_middleware`** — composes three custom layers via
+    `LlmExt`:
+    - `RequestIdStamp: RequestLayer` — stamps a counter-based
+      request-id into `req.extensions` (the reverse-DNS metadata
+      map where `anthropic.*` / `openai.*` extensions live).
+    - `RedactSecrets: ResponseLayer` — replaces `sk-live-*`
+      tokens in every text block of the response.
+    - `Timer: FullLayer` — async `BoxFuture`-wrapping timer that
+      logs before + after every `complete()` call with elapsed
+      duration. Streaming side is a pass-through (timing an
+      active stream wants `ChunkObserver`, not `FullLayer`
+      wrapping).
+    Chain composition: `.with_request_layer(..).with_response_layer(..).with_full_layer(..)`.
+    Each wrapper itself implements `Llm`, so the whole chain is
+    a drop-in replacement for any `Arc<dyn Llm>`.
+  - **`custom_memory_policy`** — implements the `MemoryPolicy`
+    trait from scratch as `KeepLastN`. Preserves leading system
+    messages, drops everything non-system except the last `n`
+    entries. The trivial base case of token-budget management.
+    Surfaces the `ConversationView` +
+    `MemoryContext { events: ScopedEmitter, token_budget }`
+    shape that all policies see.
+  - **`multi_agent_conversation`** — `ConversationLoop` driven
+    by `ScriptedUserSimulator` (3 pre-written user utterances).
+    Alternates between a scripted assistant LLM and the
+    simulator. When the user script runs out, the simulator
+    emits `UserAction::EndConversation` → `Termination::Completed
+    { EndTurn }`. Prints the full interleaved transcript.
+    Feature-gated behind `oharness-loop/conversation`.
+    Simulator errors are promoted to
+    `Termination::Failed { category: UserSimulator }` — silent
+    fall-to-end would hide simulator bugs in research logs.
+  - `oharness-loop/Cargo.toml` gains two
+    feature-forwarding flags: `llm-judge =
+    ["oharness-critic/llm-judge"]` and (already existed)
+    `conversation = []` / `reflexion = []` pattern. The three
+    gated examples use `required-features = [...]` with local
+    feature names, since cargo doesn't accept `crate/feature`
+    syntax there.
+  - `just examples` grows 5 new `cargo run` invocations + 2
+    extra `cargo build --features ...` lines
+    (`oharness-loop/conversation`, `oharness-loop/llm-judge`)
+    so feature-gated build regressions can't hide behind the
+    default-feature build. All 11 examples now smoke-run on
+    every `just ci` invocation.
+  - 233 workspace tests on `--all-features` still green (no new
+    tests this commit — the examples themselves are the tests).
+
 ### Fixed
 - **`FileSink::flush` deadlock with outstanding `Arc` clones**
   (discovered while writing the `replay_trajectory` example in M4

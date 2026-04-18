@@ -40,12 +40,19 @@ build:
 examples:
     cargo build --workspace --examples
     cargo build --workspace --examples --features oharness-loop/reflexion
+    cargo build --workspace --examples --features oharness-loop/conversation
+    cargo build --workspace --examples --features oharness-loop/llm-judge
     cargo run -p oharness-loop --example hello_scripted
     cargo run -p oharness-loop --example react_with_tools
     cargo run -p oharness-loop --example custom_critic
     cargo run -p oharness-loop --example budget_enforcement
     cargo run -p oharness-loop --example replay_trajectory
     cargo run -p oharness-loop --example reflexion_run --features reflexion
+    cargo run -p oharness-loop --example self_refine
+    cargo run -p oharness-loop --example llm_judge_critic --features llm-judge
+    cargo run -p oharness-loop --example custom_middleware
+    cargo run -p oharness-loop --example custom_memory_policy
+    cargo run -p oharness-loop --example multi_agent_conversation --features conversation
 
 # Verify the committed Event JSON Schema matches a fresh export
 # (plan §19.2). Runs the drift test under the `schemars-export`

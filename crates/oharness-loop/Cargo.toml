@@ -17,6 +17,10 @@ react = []
 # M2 part 2: conversational user-simulator loop + reflexion helper.
 conversation = []
 reflexion = []
+# Convenience forwarding feature so the `llm_judge_critic` example
+# can use `required-features = ["llm-judge"]`. Turns on
+# `oharness-critic/llm-judge` transitively; no other effect.
+llm-judge = ["oharness-critic/llm-judge"]
 
 [dependencies]
 oharness-core = { workspace = true }
@@ -49,3 +53,17 @@ oharness-budget = { workspace = true }
 [[example]]
 name = "reflexion_run"
 required-features = ["reflexion"]
+
+# `llm_judge_critic` wraps oharness-critic's `LlmJudgeCritic` which
+# lives behind `oharness-critic/llm-judge`. The `llm-judge` feature
+# on this crate forwards to that so `required-features` accepts a
+# local name (cargo doesn't allow crate/feature syntax here).
+[[example]]
+name = "llm_judge_critic"
+required-features = ["llm-judge"]
+
+# `multi_agent_conversation` drives a `ConversationLoop` which
+# lives behind the `conversation` feature on this crate.
+[[example]]
+name = "multi_agent_conversation"
+required-features = ["conversation"]
