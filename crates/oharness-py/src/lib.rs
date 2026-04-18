@@ -12,24 +12,28 @@
 //! - [`PyMemoryPolicy`]   — `transform(conversation_json: str, ctx_json: str) -> str`
 //! - [`PyToolSet`]        — `execute(name: str, input_json: str, ctx_json: str) -> str`
 //!   (specs fixed at construction time)
+//! - [`PyRequestLayer`]   — `on_request(req_json: str) -> str` (sync, in-place mutate)
+//! - [`PyResponseLayer`]  — `on_response(res_json: str) -> str` (sync, in-place mutate)
 //!
 //! All wire types cross the Rust↔Python boundary as JSON-encoded
 //! strings. The Python side implements a duck-typed class with the
 //! named method(s); the Rust side serializes arguments with serde,
-//! calls the Python method under the GIL (wrapped in
-//! `tokio::task::spawn_blocking` so the async runtime stays
-//! responsive), and deserializes the returned string.
+//! calls the Python method under the GIL (for the async adapters,
+//! wrapped in `tokio::task::spawn_blocking` so the async runtime
+//! stays responsive; for the sync `Request/ResponseLayer` adapters,
+//! called directly under the GIL — layers are expected to be cheap),
+//! and deserializes the returned string.
 //!
 //! ## v1 scope vs. later (plan §14.2)
 //!
 //! v1 (this crate, as it ships now): `Llm::complete`, `Critic::assess`,
 //! `TaskEvaluator::evaluate`, `Reflector::reflect`, `UserSimulator`,
-//! `MemoryPolicy::transform`, `ToolSet::execute`. Sync Python side
-//! (async Python is v1.1).
+//! `MemoryPolicy::transform`, `ToolSet::execute`, `RequestLayer`,
+//! `ResponseLayer`. Sync Python side (async Python is v1.1).
 //!
-//! Deferred: `Llm::stream`, `RequestLayer` / `ResponseLayer`,
-//! `ChunkObserver` / `ChunkTransformer`. Each follows the same adapter
-//! pattern when it lands — the scaffolds here are the template.
+//! Deferred: `Llm::stream`, `ChunkObserver` / `ChunkTransformer`.
+//! Streaming from Python is an open research problem (GIL + async);
+//! per-chunk observers are discouraged by per-chunk GIL cost.
 //!
 //! ## Build
 //!
@@ -62,7 +66,9 @@ use oharness_core::{
     LlmCapabilities, Message, Reflection, RunOutcome, Task, TaskEvaluator, ToolOutput, ToolSpec,
 };
 use oharness_critic::{AssessmentContext, Critic, CriticVerdict, Reflector};
-use oharness_llm::{ChunkStream, Llm, LlmError};
+use oharness_llm::{
+    ChunkStream, Llm, LlmError, RequestLayer, ResponseLayer, ResponseLayerStreamMode,
+};
 use oharness_loop::{UserAction, UserError, UserSimulator};
 use oharness_memory::{MemoryContext, MemoryError, MemoryPolicy};
 use oharness_tools::{ToolContext, ToolOutcome, ToolSet};
@@ -957,6 +963,229 @@ impl ToolSet for PyToolSet {
 }
 
 // ======================================================================
+// PyRequestLayer — wraps a Python `RequestLayer`-like object.
+// ======================================================================
+
+/// Rust handle to a Python `RequestLayer` implementation. Calls the
+/// Python object's `on_request(req_json: str) -> str` method;
+/// deserializes the returned string and replaces the outgoing
+/// `CompletionRequest` in place.
+///
+/// ## Sync-in-async blocking
+///
+/// Unlike the six async adapters, `RequestLayer` is a sync trait:
+/// `fn on_request(&self, req: &mut CompletionRequest)`. The layer
+/// still runs inside an async `complete()` / `stream()` call, so
+/// the Python call happens **synchronously under the GIL** from the
+/// async task's poll. This is fine for cheap layers — redaction,
+/// header injection, metadata merging, request-id stamping. For
+/// heavy Python work, wrap your `PyLlm` *outside* the layer
+/// composition (the layer should stay fast).
+///
+/// ## Fail-open on errors
+///
+/// Any exception on the Python side, bad JSON, or bad shape logs
+/// via `eprintln!` and leaves the request unchanged. A broken layer
+/// should not crash the run — the unmodified request still reaches
+/// the underlying LLM.
+#[pyclass]
+pub struct PyRequestLayer {
+    py_obj: PyObject,
+    name: String,
+}
+
+#[pymethods]
+impl PyRequestLayer {
+    #[new]
+    #[pyo3(signature = (py_obj, name = "python-request-layer".to_string()))]
+    fn new(py_obj: PyObject, name: String) -> Self {
+        Self { py_obj, name }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("PyRequestLayer(name={:?})", self.name)
+    }
+}
+
+impl RequestLayer for PyRequestLayer {
+    fn on_request(&self, req: &mut CompletionRequest) {
+        let req_json = match serde_json::to_string(req) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "PyRequestLayer({}): encode request: {e}; leaving unchanged",
+                    self.name
+                );
+                return;
+            }
+        };
+
+        let result = Python::with_gil(|py| -> Result<String, PyBridgeError> {
+            let out = self
+                .py_obj
+                .call_method1(py, "on_request", (req_json,))
+                .map_err(|e| PyBridgeError::PythonCall(format!("{e}")))?;
+            out.extract::<String>(py)
+                .map_err(|e| PyBridgeError::PythonCall(format!("extract str: {e}")))
+        });
+
+        let new_json = match result {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "PyRequestLayer({}): {e}; leaving request unchanged",
+                    self.name
+                );
+                return;
+            }
+        };
+
+        match serde_json::from_str::<CompletionRequest>(&new_json) {
+            Ok(r) => *req = r,
+            Err(e) => {
+                eprintln!(
+                    "PyRequestLayer({}): decode request: {e} (raw: {new_json}); \
+                     leaving request unchanged",
+                    self.name
+                );
+            }
+        }
+    }
+}
+
+// ======================================================================
+// PyResponseLayer — wraps a Python `ResponseLayer`-like object.
+// ======================================================================
+
+/// Rust handle to a Python `ResponseLayer` implementation. Calls the
+/// Python object's `on_response(res_json: str) -> str` method;
+/// deserializes the returned string and replaces the incoming
+/// `CompletionResponse` in place.
+///
+/// ## `stream_mode`
+///
+/// `ResponseLayer` has a `stream_mode()` hook that decides what
+/// happens when the layer is wrapped around `stream()`. Python
+/// users choose via a string argument at construction:
+/// - `"warn_and_skip"` (default) — log once per wrapper, pass
+///   chunks through unchanged.
+/// - `"error"` — `stream()` returns `LlmError::Unsupported`.
+/// - `"silent_skip"` — pass chunks through without logging.
+///
+/// ## Sync-in-async blocking
+///
+/// Same caveat as [`PyRequestLayer`] — called synchronously under
+/// the GIL from inside the async `complete()` task. Keep layers
+/// cheap.
+///
+/// ## Fail-open on errors
+///
+/// Any exception on the Python side, bad JSON, or bad shape logs
+/// via `eprintln!` and leaves the response unchanged.
+#[pyclass]
+pub struct PyResponseLayer {
+    py_obj: PyObject,
+    name: String,
+    stream_mode: ResponseLayerStreamMode,
+}
+
+#[pymethods]
+impl PyResponseLayer {
+    /// Construct a Python response layer. `stream_mode` picks the
+    /// behaviour when wrapped around `stream()`:
+    /// `"warn_and_skip"` (default), `"error"`, or `"silent_skip"`.
+    /// Raises `ValueError` on any other string.
+    #[new]
+    #[pyo3(signature = (
+        py_obj,
+        name = "python-response-layer".to_string(),
+        stream_mode = "warn_and_skip".to_string(),
+    ))]
+    fn new(py_obj: PyObject, name: String, stream_mode: String) -> PyResult<Self> {
+        let stream_mode = match stream_mode.as_str() {
+            "warn_and_skip" => ResponseLayerStreamMode::WarnAndSkip,
+            "error" => ResponseLayerStreamMode::Error,
+            "silent_skip" => ResponseLayerStreamMode::SilentSkip,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "PyResponseLayer: stream_mode must be one of \
+                     \"warn_and_skip\" / \"error\" / \"silent_skip\", got {other:?}"
+                )));
+            }
+        };
+        Ok(Self {
+            py_obj,
+            name,
+            stream_mode,
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PyResponseLayer(name={:?}, stream_mode={:?})",
+            self.name, self.stream_mode
+        )
+    }
+}
+
+impl ResponseLayer for PyResponseLayer {
+    fn on_response(&self, res: &mut CompletionResponse) {
+        let res_json = match serde_json::to_string(res) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "PyResponseLayer({}): encode response: {e}; leaving unchanged",
+                    self.name
+                );
+                return;
+            }
+        };
+
+        let result = Python::with_gil(|py| -> Result<String, PyBridgeError> {
+            let out = self
+                .py_obj
+                .call_method1(py, "on_response", (res_json,))
+                .map_err(|e| PyBridgeError::PythonCall(format!("{e}")))?;
+            out.extract::<String>(py)
+                .map_err(|e| PyBridgeError::PythonCall(format!("extract str: {e}")))
+        });
+
+        let new_json = match result {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "PyResponseLayer({}): {e}; leaving response unchanged",
+                    self.name
+                );
+                return;
+            }
+        };
+
+        match serde_json::from_str::<CompletionResponse>(&new_json) {
+            Ok(r) => *res = r,
+            Err(e) => {
+                eprintln!(
+                    "PyResponseLayer({}): decode response: {e} (raw: {new_json}); \
+                     leaving response unchanged",
+                    self.name
+                );
+            }
+        }
+    }
+
+    fn stream_mode(&self) -> ResponseLayerStreamMode {
+        self.stream_mode
+    }
+
+    // The trait's `name()` returns `&'static str`; our adapter holds
+    // an owned String so we can't return it directly. Fall back to
+    // the default (type name) — the user-supplied name is still
+    // useful as an attribute and in `__repr__`, just not in the
+    // `tracing::warn!` that fires once on `WarnAndSkip`.
+    // A future API-break could widen the trait method to `&str`.
+}
+
+// ======================================================================
 // Error helpers shared across the adapters
 // ======================================================================
 
@@ -1005,6 +1234,8 @@ fn oharness(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyUserSimulator>()?;
     m.add_class::<PyMemoryPolicy>()?;
     m.add_class::<PyToolSet>()?;
+    m.add_class::<PyRequestLayer>()?;
+    m.add_class::<PyResponseLayer>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

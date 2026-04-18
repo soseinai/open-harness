@@ -3,13 +3,13 @@
 Plan §14. Lets Python code plug `Llm` / `Critic` / `TaskEvaluator`
 implementations into Rust-side agent runs.
 
-> **Status: v1 — seven adapters live.** `Llm`, `Critic`,
+> **Status: v1 — nine adapters live.** `Llm`, `Critic`,
 > `TaskEvaluator`, `Reflector`, `UserSimulator`, `MemoryPolicy`,
-> and `ToolSet` all ship with their Python shim. End-to-end
-> Python-driven agent runs, `async def` Python methods, and the
-> remaining traits (`RequestLayer` / `ResponseLayer`,
-> `ChunkObserver` / `ChunkTransformer`) land in follow-up
-> milestones per plan §14.2.
+> `ToolSet`, `RequestLayer`, and `ResponseLayer` all ship with
+> their Python shim. End-to-end Python-driven agent runs,
+> `async def` Python methods, and the final streaming-side traits
+> (`Llm::stream`, `ChunkObserver` / `ChunkTransformer`) are
+> deferred per plan §14.2.
 
 ## Build
 
@@ -43,7 +43,7 @@ Rust-side check opt-in.
 
 ## Adapter pattern
 
-Seven adapter classes live on the Python side; each wraps a Python
+Nine adapter classes live on the Python side; each wraps a Python
 object implementing one method (or two, for `PyUserSimulator`).
 The wire type between Rust and Python is always a JSON-encoded
 string — deliberately not a structured `dict`, because serde on the
@@ -307,6 +307,76 @@ Notes:
 - `toolset.tool_names()` is exposed for quick Python-side
   inspection.
 
+### `PyRequestLayer`
+
+```python
+import oharness
+import json
+
+class InjectRequestId:
+    def __init__(self):
+        self.counter = 0
+
+    def on_request(self, req_json: str) -> str:
+        req = json.loads(req_json)
+        req.setdefault("metadata", {})["x-request-id"] = f"req-{self.counter}"
+        self.counter += 1
+        return json.dumps(req)
+
+layer = oharness.PyRequestLayer(InjectRequestId(), name="inject-req-id")
+```
+
+Notes:
+- The layer is called **synchronously under the GIL** from inside
+  the async `complete()` / `stream()` task. Fine for cheap work
+  (redaction, header injection, metadata merging); don't put heavy
+  Python here — wrap your `PyLlm` with slow middleware in Python
+  instead.
+- Python must return a full-shape `CompletionRequest` JSON. The
+  Rust side replaces the outgoing request in place with the
+  deserialized result.
+- **Fail-open**: exception, bad JSON, or bad shape logs to stderr
+  (`PyRequestLayer(name): ...`) and leaves the request unchanged.
+  A broken layer should not crash the run.
+
+### `PyResponseLayer`
+
+```python
+import oharness
+import json
+
+class RedactSecrets:
+    def on_response(self, res_json: str) -> str:
+        res = json.loads(res_json)
+        for block in res.get("content", []):
+            if block.get("type") == "text":
+                block["text"] = block["text"].replace("sk-live-", "sk-live-REDACTED-")
+        return json.dumps(res)
+
+layer = oharness.PyResponseLayer(
+    RedactSecrets(),
+    name="redact-live-keys",
+    stream_mode="warn_and_skip",  # or "error" / "silent_skip"
+)
+```
+
+Notes:
+- `stream_mode` picks the behaviour when the layer is wrapped
+  around `stream()`:
+  - `"warn_and_skip"` (default) — log once per wrapper, pass
+    chunks through unchanged.
+  - `"error"` — `stream()` returns
+    `LlmError::Unsupported("response_layer_on_stream")`. Use when
+    your layer's invariants can't be satisfied by streaming (e.g.,
+    the redaction has to see the whole response to decide).
+  - `"silent_skip"` — pass chunks through without logging. Rare;
+    usually you want `"warn_and_skip"` so misconfiguration is
+    audible.
+- Same sync-in-async caveat as `PyRequestLayer` — keep layers
+  cheap.
+- Same fail-open semantics — a broken layer leaves the response
+  unchanged.
+
 ## What's next
 
 Plan §14.2 priority table:
@@ -320,8 +390,9 @@ Plan §14.2 priority table:
 | `UserSimulator`     | ✅ v1 |
 | `MemoryPolicy::transform` | ✅ v1 |
 | `ToolSet::execute`  | ✅ v1 |
+| `RequestLayer`      | ✅ v1 |
+| `ResponseLayer`     | ✅ v1 |
 | `Llm::stream`       | ⏳ v1.2+ |
-| `RequestLayer` / `ResponseLayer` | ⏳ v1.1 |
 | `ChunkObserver` / `ChunkTransformer` | ⏳ per-chunk GIL cost; discouraged |
 
 Each follows the same pattern: JSON wire + `tokio::task::spawn_blocking`

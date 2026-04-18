@@ -11,6 +11,52 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 ## [Unreleased]
 
 ### Added
+- **M3 part 4: `oharness-py` adapters for `RequestLayer` +
+  `ResponseLayer`** (plan §14.2). Middleware traits complete the
+  v1 Python surface — nine of the ten plan-§14.2 traits are now
+  live. Only `Llm::stream` + `ChunkObserver`/`ChunkTransformer`
+  remain deferred (both blocked on GIL-vs-streaming design
+  questions).
+  - `PyRequestLayer(py_obj, name=...)` — expects `on_request(req_json:
+    str) -> str`. Python returns a full-shape `CompletionRequest`
+    JSON; the Rust side replaces the outgoing request in place
+    with the deserialized result.
+  - `PyResponseLayer(py_obj, name=..., stream_mode=...)` — expects
+    `on_response(res_json: str) -> str`. Python returns a
+    full-shape `CompletionResponse` JSON; in-place replacement
+    same as above. `stream_mode` is a string argument:
+    - `"warn_and_skip"` (default) — log once per wrapper, pass
+      chunks through unchanged.
+    - `"error"` — `stream()` returns `LlmError::Unsupported`.
+    - `"silent_skip"` — pass chunks through without logging.
+    Other values raise `ValueError` at construction.
+  - **Sync-in-async note** — unlike the seven async adapters,
+    `RequestLayer` / `ResponseLayer` are sync traits (`fn
+    on_request(&self, req: &mut CompletionRequest)`). The Python
+    call happens **synchronously under the GIL** from inside the
+    async `complete()` / `stream()` task. Fine for cheap layers
+    (redaction, header injection, metadata merging); users who
+    need heavy Python work should compose it outside the layer
+    chain. Using `tokio::task::spawn_blocking` here would require
+    blocking the current task on a `JoinHandle`, which defeats
+    the point.
+  - **Fail-open on errors** — any Python exception, bad JSON, or
+    bad shape logs to stderr (`PyRequestLayer(name): ...`) and
+    leaves the request / response unchanged. A broken layer must
+    not crash the run; the unmodified value still reaches the
+    next stage.
+  - **`ResponseLayer::name()` caveat** — the trait method returns
+    `&'static str`, which our adapter's owned `String` name
+    doesn't satisfy, so the trait falls back to the default
+    (type name). The user-supplied name is still exposed via
+    `__repr__` and is useful for Python-side inspection. A future
+    API-break could widen the trait method to `&str`.
+  - `#[pymodule]` registers `PyRequestLayer` + `PyResponseLayer`.
+    README adds `inject-request-id` + `redact-secrets` examples
+    with full wire notes and the sync-in-async / fail-open
+    caveats. Scope table flips `RequestLayer` / `ResponseLayer`
+    from `⏳ v1.1` to `✅ v1`.
+  - 230 workspace tests on `--all-features` still green.
 - **M3 part 3: `oharness-py` adapter for `ToolSet`** (plan §14.2).
   Python-side classes can now ship as first-class tools inside
   Rust-driven agent runs. Seven of the ten plan-§14.2 traits are
