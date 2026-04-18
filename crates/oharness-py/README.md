@@ -3,11 +3,11 @@
 Plan §14. Lets Python code plug `Llm` / `Critic` / `TaskEvaluator`
 implementations into Rust-side agent runs.
 
-> **Status: v1 — six adapters live.** `Llm`, `Critic`,
-> `TaskEvaluator`, `Reflector`, `UserSimulator`, and `MemoryPolicy`
-> all ship with their Python shim. End-to-end Python-driven agent
-> runs, `async def` Python methods, and the remaining traits
-> (`ToolSet`, `RequestLayer` / `ResponseLayer`,
+> **Status: v1 — seven adapters live.** `Llm`, `Critic`,
+> `TaskEvaluator`, `Reflector`, `UserSimulator`, `MemoryPolicy`,
+> and `ToolSet` all ship with their Python shim. End-to-end
+> Python-driven agent runs, `async def` Python methods, and the
+> remaining traits (`RequestLayer` / `ResponseLayer`,
 > `ChunkObserver` / `ChunkTransformer`) land in follow-up
 > milestones per plan §14.2.
 
@@ -43,8 +43,8 @@ Rust-side check opt-in.
 
 ## Adapter pattern
 
-Six adapter classes live on the Python side; each wraps a Python
-object implementing a single method (or two, for `PyUserSimulator`).
+Seven adapter classes live on the Python side; each wraps a Python
+object implementing one method (or two, for `PyUserSimulator`).
 The wire type between Rust and Python is always a JSON-encoded
 string — deliberately not a structured `dict`, because serde on the
 Rust side already has the canonical codec.
@@ -242,6 +242,71 @@ Notes:
   silently pass the raw conversation through — corrupted context
   windows are worse than a failed run.
 
+### `PyToolSet`
+
+```python
+import oharness
+import json
+
+SPECS = [
+    {
+        "name": "reverse",
+        "description": "Reverse a string.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
+    },
+]
+
+class StringTools:
+    def execute(self, name: str, input_json: str, ctx_json: str) -> str:
+        args = json.loads(input_json)
+        if name == "reverse":
+            return json.dumps({
+                "outcome": "success_text",
+                "text": args["text"][::-1],
+            })
+        return json.dumps({
+            "outcome": "execution_error",
+            "message": f"unknown tool: {name}",
+            "recoverable": False,
+        })
+
+toolset = oharness.PyToolSet(StringTools(), json.dumps(SPECS), name="string-tools")
+```
+
+Wire shapes for the `execute` return value:
+
+```json
+{"outcome": "success", "output": {"content": [{"type":"text","text":"..."}], "truncated": false}}
+{"outcome": "success_text", "text": "..."}
+{"outcome": "execution_error", "message": "...", "recoverable": false}
+{"outcome": "denied", "reason": "..."}
+{"outcome": "cancelled"}
+```
+
+Notes:
+- **Specs are fixed at construction time.** The Rust loop reads
+  `specs()` once per request when assembling the
+  `CompletionRequest`, so round-tripping through Python on every
+  turn just to list tools would be wasteful. Rebuild the
+  `PyToolSet` between runs if you need a different spec set.
+- `ctx_json` carries `workspace_path` (optional) + `extensions` (a
+  reverse-DNS metadata map). `EventSink`, `BudgetHandle`,
+  `Cancellation`, `ApprovalChannel` are Rust-runtime types that
+  can't usefully be exposed to Python in v1.
+- `success_text` is a shorthand — it's equivalent to `success`
+  with a single text `ToolOutput` block. Handy for the common
+  "tool returns one string" case.
+- Errors (exception, malformed JSON, bad shape) turn into
+  `ExecutionError { recoverable: false }`. The loop will see the
+  failure via `tool.call.failed` — the agent continues, it just
+  sees the error as the tool result.
+- `toolset.tool_names()` is exposed for quick Python-side
+  inspection.
+
 ## What's next
 
 Plan §14.2 priority table:
@@ -254,8 +319,8 @@ Plan §14.2 priority table:
 | `Reflector::reflect` | ✅ v1 |
 | `UserSimulator`     | ✅ v1 |
 | `MemoryPolicy::transform` | ✅ v1 |
+| `ToolSet::execute`  | ✅ v1 |
 | `Llm::stream`       | ⏳ v1.2+ |
-| `ToolSet`           | ⏳ v1.1 |
 | `RequestLayer` / `ResponseLayer` | ⏳ v1.1 |
 | `ChunkObserver` / `ChunkTransformer` | ⏳ per-chunk GIL cost; discouraged |
 

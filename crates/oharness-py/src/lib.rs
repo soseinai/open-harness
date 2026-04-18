@@ -10,6 +10,8 @@
 //! - [`PyUserSimulator`]  — `initial_message(task_json: str) -> str`
 //!   plus `respond(conversation_json: str, task_json: str) -> str`
 //! - [`PyMemoryPolicy`]   — `transform(conversation_json: str, ctx_json: str) -> str`
+//! - [`PyToolSet`]        — `execute(name: str, input_json: str, ctx_json: str) -> str`
+//!   (specs fixed at construction time)
 //!
 //! All wire types cross the Rust↔Python boundary as JSON-encoded
 //! strings. The Python side implements a duck-typed class with the
@@ -22,9 +24,10 @@
 //!
 //! v1 (this crate, as it ships now): `Llm::complete`, `Critic::assess`,
 //! `TaskEvaluator::evaluate`, `Reflector::reflect`, `UserSimulator`,
-//! `MemoryPolicy::transform`. Sync Python side (async Python is v1.1).
+//! `MemoryPolicy::transform`, `ToolSet::execute`. Sync Python side
+//! (async Python is v1.1).
 //!
-//! Deferred: `Llm::stream`, `ToolSet`, `RequestLayer` / `ResponseLayer`,
+//! Deferred: `Llm::stream`, `RequestLayer` / `ResponseLayer`,
 //! `ChunkObserver` / `ChunkTransformer`. Each follows the same adapter
 //! pattern when it lands — the scaffolds here are the template.
 //!
@@ -56,12 +59,14 @@
 use async_trait::async_trait;
 use oharness_core::{
     CompletionRequest, CompletionResponse, ConversationView, Episode, EvaluationResult,
-    LlmCapabilities, Message, Reflection, RunOutcome, Task, TaskEvaluator,
+    LlmCapabilities, Message, Reflection, RunOutcome, Task, TaskEvaluator, ToolOutput, ToolSpec,
 };
 use oharness_critic::{AssessmentContext, Critic, CriticVerdict, Reflector};
 use oharness_llm::{ChunkStream, Llm, LlmError};
 use oharness_loop::{UserAction, UserError, UserSimulator};
 use oharness_memory::{MemoryContext, MemoryError, MemoryPolicy};
+use oharness_tools::{ToolContext, ToolOutcome, ToolSet};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use serde::Serialize;
@@ -718,6 +723,240 @@ impl MemoryPolicy for PyMemoryPolicy {
 }
 
 // ======================================================================
+// PyToolSet — wraps a Python `ToolSet`-like object.
+// ======================================================================
+
+/// Rust handle to a Python `ToolSet` implementation. Calls
+/// `execute(name: str, input_json: str, ctx_json: str) -> str` for
+/// each tool invocation; the returned string is a JSON-encoded
+/// [`ToolOutcome`].
+///
+/// **Specs are fixed at construction time** — they're passed in as a
+/// JSON array and stored as owned `Vec<ToolSpec>`. This avoids
+/// round-tripping through Python on every turn just to ask "what
+/// tools do you have?" (the loop reads `specs()` once per request
+/// when assembling the `CompletionRequest`). If you need dynamic
+/// specs, rebuild the `PyToolSet` between runs.
+///
+/// ## Wire shapes
+///
+/// Input to Python's `execute`:
+/// - `name`: the tool name (one of the specs' names).
+/// - `input_json`: JSON-encoded tool input (whatever shape the
+///   `input_schema` describes — tools validate their own inputs).
+/// - `ctx_json`: a trimmed [`ToolContext`] view — only
+///   `workspace_path` (optional string) and `extensions` (metadata
+///   map) cross the boundary. `EventSink`, `BudgetHandle`,
+///   `Cancellation`, `ApprovalChannel` are Rust-runtime types that
+///   can't usefully be exposed to Python in v1.
+///
+/// Output from Python's `execute`:
+///
+/// ```json
+/// {"outcome": "success", "output": {"content": [{"type":"text","text":"..."}], "truncated": false}}
+/// {"outcome": "execution_error", "message": "...", "recoverable": false}
+/// {"outcome": "denied", "reason": "..."}
+/// {"outcome": "cancelled"}
+/// ```
+///
+/// As a convenience, bare-string success is also accepted:
+/// `{"outcome": "success_text", "text": "..."}` is equivalent to
+/// the full `{"outcome": "success", "output": {...}}` form with a
+/// single text block.
+///
+/// ## Error handling
+///
+/// Any Python exception, bad JSON, or bad shape is promoted to
+/// [`ToolOutcome::ExecutionError`] with `recoverable: false` and the
+/// bridge error as the message. This lets the loop see the failure
+/// (via `tool.call.failed`) without crashing the run.
+#[pyclass]
+pub struct PyToolSet {
+    py_obj: PyObject,
+    specs: Vec<ToolSpec>,
+    name: String,
+}
+
+#[pymethods]
+impl PyToolSet {
+    /// Build a `PyToolSet` from a Python object and a JSON array of
+    /// [`ToolSpec`]s. A typical construction:
+    ///
+    /// ```python
+    /// specs = json.dumps([{
+    ///     "name": "echo",
+    ///     "description": "Echo the input.",
+    ///     "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}},
+    /// }])
+    /// toolset = oharness.PyToolSet(MyToolSet(), specs, name="python-tools")
+    /// ```
+    ///
+    /// Raises `ValueError` if `specs_json` doesn't deserialize as
+    /// `Vec<ToolSpec>`.
+    #[new]
+    #[pyo3(signature = (py_obj, specs_json, name = "python-toolset".to_string()))]
+    fn new(py_obj: PyObject, specs_json: &str, name: String) -> PyResult<Self> {
+        let specs: Vec<ToolSpec> = serde_json::from_str(specs_json).map_err(|e| {
+            PyValueError::new_err(format!(
+                "PyToolSet: specs_json must be a JSON array of ToolSpec: {e}"
+            ))
+        })?;
+        Ok(Self {
+            py_obj,
+            specs,
+            name,
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PyToolSet(name={:?}, tools={})",
+            self.name,
+            self.specs.len()
+        )
+    }
+
+    /// Names of the tools this set exposes. Useful from Python for
+    /// quick inspection.
+    fn tool_names(&self) -> Vec<String> {
+        self.specs.iter().map(|s| s.name.clone()).collect()
+    }
+}
+
+/// Trimmed `ToolContext` view that crosses the boundary. Rust-runtime
+/// types (`EventSink` / `BudgetHandle` / `Cancellation` /
+/// `ApprovalChannel`) don't serialize; dropping them is consistent
+/// with the `PyMemoryPolicy` approach for `ScopedEmitter`. A
+/// Python-side "observability" channel may land in a future revision
+/// — for now, Python tools are essentially stateless.
+#[derive(Serialize)]
+struct ToolContextWire<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspace_path: Option<String>,
+    extensions: &'a oharness_core::MetadataMap,
+}
+
+/// Python-side `execute` return shape. Snake-case externally-tagged
+/// enum — matches the documented wire in the `PyToolSet` doc.
+#[derive(serde::Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+enum WireToolOutcome {
+    Success { output: ToolOutput },
+    /// Convenience variant for the very common "single text block"
+    /// success case. Python users can write
+    /// `{"outcome":"success_text","text":"..."}` instead of
+    /// assembling the full `ToolOutput` JSON.
+    SuccessText { text: String },
+    ExecutionError {
+        message: String,
+        #[serde(default)]
+        recoverable: bool,
+    },
+    Denied { reason: String },
+    Cancelled,
+}
+
+impl From<WireToolOutcome> for ToolOutcome {
+    fn from(w: WireToolOutcome) -> Self {
+        match w {
+            WireToolOutcome::Success { output } => ToolOutcome::Success(output),
+            WireToolOutcome::SuccessText { text } => {
+                ToolOutcome::Success(ToolOutput::text(text))
+            }
+            WireToolOutcome::ExecutionError {
+                message,
+                recoverable,
+            } => ToolOutcome::ExecutionError {
+                message,
+                recoverable,
+            },
+            WireToolOutcome::Denied { reason } => ToolOutcome::Denied { reason },
+            WireToolOutcome::Cancelled => ToolOutcome::Cancelled,
+        }
+    }
+}
+
+#[async_trait]
+impl ToolSet for PyToolSet {
+    fn specs(&self) -> &[ToolSpec] {
+        &self.specs
+    }
+
+    async fn execute(
+        &self,
+        name: &str,
+        input: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> ToolOutcome {
+        let input_json = match serde_json::to_string(&input) {
+            Ok(s) => s,
+            Err(e) => {
+                return ToolOutcome::ExecutionError {
+                    message: format!("PyToolSet: encode input: {e}"),
+                    recoverable: false,
+                };
+            }
+        };
+
+        let ctx_wire = ToolContextWire {
+            workspace_path: ctx
+                .workspace_path()
+                .map(|p| p.to_string_lossy().into_owned()),
+            extensions: &ctx.extensions,
+        };
+        let ctx_json = match serde_json::to_string(&ctx_wire) {
+            Ok(s) => s,
+            Err(e) => {
+                return ToolOutcome::ExecutionError {
+                    message: format!("PyToolSet: encode ctx: {e}"),
+                    recoverable: false,
+                };
+            }
+        };
+
+        let py_obj = self.py_obj.clone_ref_unbound_gil();
+        let name_owned = name.to_string();
+        let set_name = self.name.clone();
+        let res = tokio::task::spawn_blocking(move || -> Result<String, PyBridgeError> {
+            Python::with_gil(|py| {
+                let out = py_obj
+                    .call_method1(py, "execute", (name_owned, input_json, ctx_json))
+                    .map_err(|e| PyBridgeError::PythonCall(format!("{e}")))?;
+                out.extract::<String>(py)
+                    .map_err(|e| PyBridgeError::PythonCall(format!("extract str: {e}")))
+            })
+        })
+        .await;
+
+        let outcome_json = match res {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
+                return ToolOutcome::ExecutionError {
+                    message: format!("PyToolSet({set_name}): {e}"),
+                    recoverable: false,
+                };
+            }
+            Err(e) => {
+                return ToolOutcome::ExecutionError {
+                    message: format!("PyToolSet({set_name}): join: {e}"),
+                    recoverable: false,
+                };
+            }
+        };
+
+        match serde_json::from_str::<WireToolOutcome>(&outcome_json) {
+            Ok(w) => w.into(),
+            Err(e) => ToolOutcome::ExecutionError {
+                message: format!(
+                    "PyToolSet({set_name}): decode outcome: {e} (raw: {outcome_json})"
+                ),
+                recoverable: false,
+            },
+        }
+    }
+}
+
+// ======================================================================
 // Error helpers shared across the adapters
 // ======================================================================
 
@@ -765,6 +1004,7 @@ fn oharness(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyReflector>()?;
     m.add_class::<PyUserSimulator>()?;
     m.add_class::<PyMemoryPolicy>()?;
+    m.add_class::<PyToolSet>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

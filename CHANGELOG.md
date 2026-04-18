@@ -11,6 +11,52 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 ## [Unreleased]
 
 ### Added
+- **M3 part 3: `oharness-py` adapter for `ToolSet`** (plan §14.2).
+  Python-side classes can now ship as first-class tools inside
+  Rust-driven agent runs. Seven of the ten plan-§14.2 traits are
+  now live; three remain deferred.
+  - `PyToolSet(py_obj, specs_json, name=...)` — expects
+    `execute(name: str, input_json: str, ctx_json: str) -> str`
+    returning a JSON-encoded `ToolOutcome`. **Specs are fixed at
+    construction time** (passed in as a JSON array of `ToolSpec`,
+    deserialized once, stored as `Vec<ToolSpec>`, returned by
+    `specs()` as a slice). This avoids round-tripping through
+    Python on every turn just to enumerate tools — the loop reads
+    `specs()` once per request.
+  - **Wire shapes for the `execute` return value** (snake_case
+    tagged union, matching `WireToolOutcome`):
+    - `{"outcome":"success","output":{...ToolOutput...}}` —
+      full-fidelity success.
+    - `{"outcome":"success_text","text":"..."}` — convenience
+      variant equivalent to `success` with a single text
+      `ToolOutput` block; handy for the common "tool returns one
+      string" case.
+    - `{"outcome":"execution_error","message":"...","recoverable":false}`
+    - `{"outcome":"denied","reason":"..."}`
+    - `{"outcome":"cancelled"}`
+  - **`ToolContextWire`** is trimmed: only `workspace_path`
+    (optional) + `extensions` (reverse-DNS metadata map) cross the
+    boundary. `EventSink`, `BudgetHandle`, `Cancellation`,
+    `ApprovalChannel` are Rust-runtime types that can't usefully
+    be serialized to Python in v1 (same pattern as
+    `PyMemoryPolicy`'s `ScopedEmitter` handling).
+  - **Error handling**: any Python exception, malformed JSON, or
+    bad-shape response is promoted to `ToolOutcome::ExecutionError
+    { recoverable: false }` with the bridge error as the message.
+    The loop sees the failure via `tool.call.failed`; the agent
+    continues and sees the error as the tool result. Unlike
+    `PyMemoryPolicy` errors (fatal for the turn), tool errors are
+    recoverable signals the agent can reason about.
+  - **Python-side utility**: `toolset.tool_names()` returns the
+    list of registered tool names for quick inspection.
+  - `#[pymodule]` registers `PyToolSet`; `oharness-py/Cargo.toml`
+    gains `oharness-tools` as a path dep. README grows a
+    `reverse`-tool example, full wire-shape reference, and the
+    scope table flips `ToolSet` from `⏳ v1.1` to `✅ v1`.
+  - Remaining deferred per plan §14.2: `Llm::stream` (v1.2+),
+    `Request/ResponseLayer` (v1.1), `ChunkObserver` /
+    `ChunkTransformer` (discouraged by per-chunk GIL cost).
+  - 230 workspace tests on `--all-features` still green.
 - **M3 part 2: `oharness-py` adapters for Reflector / UserSimulator /
   MemoryPolicy** (plan §14.2). Three more traits join the v1
   adapter surface; the JSON-wire + `tokio::task::spawn_blocking`

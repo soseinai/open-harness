@@ -26,6 +26,7 @@ oharness-core = { path = "../oharness-core" }
 oharness-llm = { path = "../oharness-llm" }
 oharness-critic = { path = "../oharness-critic" }
 oharness-memory = { path = "../oharness-memory" }
+oharness-tools = { path = "../oharness-tools" }
 # `oharness-loop` brings in `UserSimulator` / `UserAction` / `UserError`.
 # Default features are fine — we don't link any loop runners here, just
 # the trait definitions.
