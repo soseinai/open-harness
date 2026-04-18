@@ -377,6 +377,49 @@ the patch base into a temp dir), defines `TaskEvaluator` that runs the
 project's tests after the agent's patch. Get at least **5 tasks** passing end-
 to-end — that's the M2 gate.
 
+**Adapter plumbing landed** (commit tagged as "M2 part 4" in the changelog).
+The `oharness-bench-swe` crate ships with:
+- `SweBenchInstance` + `SweBenchLite::from_jsonl(path)` JSONL loader — users
+  download the dataset dump themselves for now; runtime fetch from HF is a
+  later enhancement.
+- `Benchmark` impl that shells out to `git clone` + `git checkout` to stage a
+  per-task `Workspace` at `{clone_root}/{instance_id}/`.
+- `SweBenchEvaluator` that `git apply`s the test patch, runs a configurable
+  test command (defaults to `pytest -v --tb=short --no-header`), parses
+  per-test `PASSED`/`FAILED` outcomes, and grades against the
+  `FAIL_TO_PASS` / `PASS_TO_PASS` id sets. `EvaluationResult.details`
+  carries the outcome map + a 4KB tail of raw pytest output for
+  post-run inspection.
+- Integration test uses a synthetic local git repo + `cat` as the test
+  command (no pytest / python required on the host) to exercise the full
+  flow: dataset → staging → patch apply → grading.
+
+**Still open — the actual M2 gate**: running ≥5 real SWE-bench-lite tasks
+with a live LLM and verifying they pass end-to-end. That's an eval campaign,
+not a coding task. Concrete steps when you want to do the run:
+
+1. Download a SWE-bench-lite dump (HuggingFace dataset viewer → JSONL
+   export), point `SweBenchLite::from_jsonl(path)` at it.
+2. Provide an agent factory that builds an `Agent` whose `fs` / `bash`
+   tools are scoped to the task's `workspace.path` — the current
+   `FsToolSet` / `BashTool` don't workspace-scope paths, so you either
+   (a) wrap them in a workspace-scoping decorator, or (b) cd into the
+   workspace when spawning.
+3. Each task's repo needs a Python env with the project's test deps
+   installed; the reference SWE-bench uses per-task Docker images. For
+   open-harness, simplest is to pre-build conda envs per (repo, version)
+   pair and pass `PYTHONPATH` / `--python` in the evaluator's
+   `test_command`.
+4. Run `run_benchmark` with `sample_n = 5` (or `filter = "astropy__astropy"`
+   etc) and a sensible `max_cost_usd` cap on the Llm middleware stack.
+5. Inspect the resulting results directory — per-task
+   `evaluation.json.details.fail_to_pass_missing` surfaces exactly which
+   tests regressed.
+
+The adapter is complete for step 1. Steps 2–4 are per-run configuration
+decisions rather than library code, which is why the gate is a run-it
+concern rather than a code-writing concern.
+
 ---
 
 ## 4. M3 — "Polyglot" (Python bindings)

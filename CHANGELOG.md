@@ -32,6 +32,47 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **M2 part 4 — `oharness-bench-swe` adapter crate** (plan §13.6). The
+  first real-benchmark adapter plumbing: dataset types, git-workspace
+  staging, patch apply, and FAIL_TO_PASS / PASS_TO_PASS grading. The
+  ≥5-passing M2 completion gate is NOT hit by this commit — it's an
+  eval campaign requiring a live LLM, per-repo Python envs, and money;
+  see docs/remaining-work.md §3.4 for the run-it recipe.
+  - `SweBenchInstance` deserializes one dataset record. `FAIL_TO_PASS`
+    / `PASS_TO_PASS` accept both SCREAMING_CASE (canonical) and
+    snake_case (for hand-authored fixtures) on the way in and emit
+    SCREAMING_CASE on the way out.
+  - `SweBenchLite::from_jsonl(path)` loads a dataset dump from disk
+    (one JSON record per line). HF-hub fetch deferred.
+  - `Benchmark` impl: `load_task` shells out to `git clone` +
+    `git checkout base_commit` in `{clone_root}/{instance_id}/`,
+    returns a `LoadedTask` whose `Workspace.path` is the cloned repo.
+    The `Task.instruction` bundles the problem statement with an
+    orientation blurb; the full instance record is stashed on
+    `Task.metadata["swe-bench.instance"]` so critics / reflectors /
+    the evaluator can pull any field they need.
+  - `SweBenchEvaluator` implements `TaskEvaluator`:
+    `git apply test_patch`, runs a configurable test command
+    (default `pytest -v --tb=short --no-header`; override via
+    `.with_test_command(..)` for stubs / different runners),
+    parses per-test outcomes, grades pass iff all FAIL_TO_PASS +
+    PASS_TO_PASS ids pass. `details` carries the outcome map, the
+    specific ids that regressed / went missing, and a 4KB tail of
+    raw pytest output for post-run inspection.
+  - Hand-rolled pytest parser: forgiving of `-v` output with color,
+    ignores short-summary failure recap lines, respects last-seen
+    status for retry-plugin scenarios.
+  - Dataset-side path heuristic: `repo` field passes through when it
+    looks like a URL (`http://`, `https://`, `git@`) or an absolute
+    local path (`/tmp/upstream.git` — used by the test fixture);
+    otherwise treated as a GitHub `owner/name` slug and expanded to
+    `https://github.com/owner/name.git`.
+  - 16 unit tests (dataset loader, URL heuristic, id sanitization,
+    task-metadata stashing, pytest parser edge cases, grading logic)
+    + 2 synthetic-fixture integration tests that spin up a local git
+    repo and drive the full benchmark → evaluator flow using `cat` as
+    the test command (no pytest / python required on the host).
+    220 tests total on `--all-features` (was 202).
 - **M2 part 3 — `oharness-eval` crate** (plan §13). Final slice of the
   M2 trait surface: `TaskEvaluator` moves to `oharness-core` (so it
   can be shared between the loop's `run_reflexion` and the benchmark
