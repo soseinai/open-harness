@@ -11,6 +11,54 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 ## [Unreleased]
 
 ### Added
+- **M4 docs pass — front-door docs** (plan §18.2). Closes the
+  user-facing documentation gate for v1.0. Four new docs land:
+  - **`README.md`** — rewritten from a stale M1a-era stub into
+    a proper front door. Positioning + target audiences, a
+    "what's shipped" status table, a 10-line Hello-agent
+    snippet, a per-crate layout, a table of the 11 shipped
+    runnable examples with one-line summaries, and pointers
+    into the rest of the docs.
+  - **`docs/philosophy.md`** — promotes plan §2's design
+    principles into a standalone document with concrete
+    examples from the shipped code. Explains why this library
+    is a **kernel** rather than an integration surface (the
+    LangChain-vs-this comparison), the three target audiences
+    in priority order, and the eight design principles
+    (small-kernel, data-oriented boundaries, composition over
+    configuration, no surprise orchestration, deterministic+
+    instrumented, Rust core with Python surface, provider
+    honesty, fail loud). Closes with a "what open-harness is
+    NOT" section that's explicit about the five most common
+    false expectations.
+  - **`docs/quickstart.md`** — the "first agent in 5 minutes"
+    walkthrough. Six steps: add deps, run an agent with no API
+    key via a scripted Llm, swap in a real provider, capture
+    a trajectory to JSONL, replay it via `ReplayLlm`, then
+    pointers to the 11 examples for next-layer topics (tools,
+    critics, budgets, middleware, memory, reflexion).
+  - **`docs/concepts.md`** — the mental model. The pipeline
+    diagram (Task → Agent → Loop → RunOutcome → Events →
+    EventSink → trajectory.jsonl), per-type walkthroughs of
+    everything a user handles (`Task`, `Agent`, `Loop`,
+    `RunOutcome`), the eight user-facing traits you extend
+    (`Llm`, `ToolSet`, `Critic`, `MemoryPolicy`, `Reflector`,
+    `UserSimulator`, `TaskEvaluator`, plus the middleware
+    helpers), middleware composition, events + trajectory
+    shape, budgets, benchmarks, and the crate DAG.
+  - Cross-links wired throughout — every doc links to the
+    others, and the README links to all four plus the
+    pre-existing `security.md`, `pricing.md`, `RELEASE.md`,
+    `CHANGELOG-schema.md`.
+  - Plan §18.2's remaining targets (`docs/llm.md`,
+    `docs/tools.md`, `docs/memory.md`, `docs/events.md`,
+    `docs/critics.md`, `docs/benchmarks.md`, `docs/python.md`
+    per-subsystem reference docs) are a future batch — the
+    per-crate `README.md` files shipped in the previous
+    "publish prep" commit cover the same ground at a lower
+    density, and `concepts.md` covers the cross-cutting shape.
+
+### Added
 - **M4 security audit — `docs/security.md` + BashTool hardening**
   (plan §21.1 / remaining-work §5 gate). The audit closes the
   plan's "security review of `bash`" M4 gate. Three concrete
