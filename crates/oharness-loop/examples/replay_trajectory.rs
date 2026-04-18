@@ -1,6 +1,6 @@
-//! `replay_trajectory` — run an agent, then replay the recorded
-//! trajectory against [`ReplayLlm`] and verify the re-drive matches
-//! the original.
+//! `replay_trajectory` — run an agent, record every event to a
+//! JSONL trajectory file, then replay that file via [`ReplayLlm`]
+//! and verify the re-drive matches the original.
 //!
 //! This is the "scientific" path: you get bit-for-bit reproducibility
 //! of a recorded run without needing the underlying provider's API
@@ -14,11 +14,6 @@
 //! adds canonical-JSON equality and emits `critic.failed` on drift,
 //! controlled via `DriftPolicy::WarnAndContinue` (default) or
 //! `DriftPolicy::Fail`.
-//!
-//! The example also demonstrates writing the captured trajectory to a
-//! JSONL file alongside the in-memory round-trip — that's the
-//! on-disk format `oharness_trace::jsonl::read_events` + external
-//! tools (`jq`, paper-supplement analysis scripts) consume.
 //!
 //! Run with:
 //!
@@ -34,9 +29,8 @@ use oharness_core::{
 use oharness_llm::{ChunkStream, Llm, LlmError};
 use oharness_loop::{Agent, ReactLoop};
 use oharness_tools::fs::FsToolSet;
-use oharness_trace::{DriftPolicy, InMemorySink, ReplayLlm, ReplayMode};
+use oharness_trace::{DriftPolicy, FileSink, ReplayLlm, ReplayMode};
 use serde_json::json;
-use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -105,10 +99,16 @@ fn script() -> Vec<CompletionResponse> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -----------------------------------------------------------------
-    // Phase 1: live run that captures every event into an InMemorySink.
+    // Phase 1: live run that records every event straight to a JSONL
+    // trajectory file — the on-disk format external tooling (`jq`,
+    // paper-supplement analysis scripts, `ReplayLlm::from_path`)
+    // consumes.
     // -----------------------------------------------------------------
-    println!("[phase 1] live run");
-    let sink = Arc::new(InMemorySink::new());
+    let tempdir = tempfile::tempdir()?;
+    let path = tempdir.path().join("trajectory.jsonl");
+    println!("[phase 1] live run → {}", path.display());
+
+    let sink = Arc::new(FileSink::to_path(&path).await?);
     let live_agent = Agent::builder()
         .with_llm(Arc::new(ScriptedLlm {
             responses: script(),
@@ -120,42 +120,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_max_turns(5)
         .build()?;
     let live_outcome = live_agent.run(Task::new("look around")).await?;
-    let events = sink.events();
+
+    // Drain the writer task so every queued event is on disk before
+    // `ReplayLlm::from_path` reads the file. `flush()` runs cleanly
+    // against the shared `Arc<FileSink>` — the close signal lets the
+    // writer exit without waiting for every `Arc` clone to drop.
+    sink.flush().await?;
+
     println!(
-        "  termination: {:?}, turns: {}, events: {}",
-        live_outcome.termination,
-        live_outcome.usage.turns,
-        events.len(),
+        "  termination: {:?}, turns: {}",
+        live_outcome.termination, live_outcome.usage.turns,
     );
 
     // -----------------------------------------------------------------
-    // (Optional) write the captured trajectory to a JSONL file, the
-    // on-disk format external tooling consumes. Uses plain std::io —
-    // `FileSink` is the production-grade sink but requires careful
-    // drop semantics to flush, so we keep the example self-contained
-    // by serializing the captured events directly.
-    // -----------------------------------------------------------------
-    let tempdir = tempfile::tempdir()?;
-    let path = tempdir.path().join("trajectory.jsonl");
-    {
-        let mut f = std::fs::File::create(&path)?;
-        for event in &events {
-            let line = serde_json::to_string(event)?;
-            writeln!(f, "{line}")?;
-        }
-    }
-    println!(
-        "[phase 1.5] wrote {} events → {}",
-        events.len(),
-        path.display()
-    );
-
-    // -----------------------------------------------------------------
-    // Phase 2: replay directly from the captured events (same result
-    // as reading back from disk via `ReplayLlm::from_path`).
+    // Phase 2: replay directly from the recorded file. Under the hood
+    // `from_path` streams the JSONL and cherry-picks `llm.response`
+    // events into the replay queue.
     // -----------------------------------------------------------------
     println!("[phase 2] replay");
-    let replay = ReplayLlm::from_events(events, ReplayMode::Positional, DriftPolicy::default())?;
+    let replay =
+        ReplayLlm::from_path(&path, ReplayMode::Positional, DriftPolicy::default()).await?;
     let replay_agent = Agent::builder()
         .with_llm(Arc::new(replay))
         .with_tools(Arc::new(FsToolSet::new()))

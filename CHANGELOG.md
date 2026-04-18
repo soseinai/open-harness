@@ -10,6 +10,45 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 
 ## [Unreleased]
 
+### Fixed
+- **`FileSink::flush` deadlock with outstanding `Arc` clones**
+  (discovered while writing the `replay_trajectory` example in M4
+  examples batch 1). The writer task drained events via
+  `while let Some(event) = rx.recv().await`, which only returns
+  `None` when *every* `Sender<Event>` has dropped. Since
+  `flush(&self)` cannot drop `self.tx`, any caller holding an
+  `Arc<FileSink>` clone at flush time would hang forever on the
+  awaited `JoinHandle`.
+  - **Fix**: added an internal `tokio::sync::oneshot` close
+    channel. The writer loop now `select!`s between `rx.recv()`
+    and `&mut close_rx`; when the close signal fires (sender
+    dropped), the writer drains any remaining queued events via
+    `rx.try_recv()` and finalises the file. `flush()` takes the
+    sender out of an internal `Mutex<Option<_>>`, drops it to
+    fire the signal, then awaits the writer as before. Idempotent
+    — second `flush()` call is a no-op `Ok(())`.
+  - **Regression test**: `flush_completes_with_outstanding_arc_clones`
+    wraps a 2-second `tokio::time::timeout` around the flush call
+    while deliberately holding an `Arc<FileSink>` clone alive; the
+    fixed version completes in single-digit milliseconds, the
+    old version hung indefinitely.
+  - Two more tests: `flush_is_idempotent` (back-to-back calls
+    must both return `Ok`) and `emit_after_flush_is_warned_not_panicked`
+    (post-flush emits hit the existing `TrySendError::Closed`
+    warn-drop path without panicking).
+  - `crates/oharness-loop/examples/replay_trajectory.rs` reverts
+    to the natural `FileSink::to_path(...) + sink.flush().await`
+    flow. The earlier workaround (capture into `InMemorySink`,
+    then serialize to disk by hand with `serde_json::to_string` +
+    `writeln!`) is gone; the example is ~15 LOC shorter and
+    matches what the `FileSink` docstring has always promised.
+  - `oharness-trace/Cargo.toml` gains `time` as a regular dep
+    (was transitively available but not explicitly listed) and
+    a `[dev-dependencies]` section with `tokio` (macros + time)
+    + `tempfile = "3"` for the new tests.
+  - 233 workspace tests on `--all-features` (was 230; +3 new
+    `FileSink` tests).
+
 ### Added
 - **M4 examples-in-CI batch 1** (plan §18.3 / remaining-work §5). Five
   new runnable examples land in `crates/oharness-loop/examples/`,

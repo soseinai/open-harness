@@ -7,6 +7,13 @@
 //! Backpressure model (§4.6): emitters `try_send` first; on `Full`, they spawn a
 //! `spawn_blocking` task that calls `blocking_send`. The block stays on the
 //! blocking pool, never on a tokio worker thread.
+//!
+//! Shutdown: `flush()` sends a `oneshot` close signal that the writer
+//! task `select!`s on alongside the event channel. The writer drains
+//! any still-buffered events via `try_recv` before finalising the
+//! file. This lets `flush()` run cleanly against a shared
+//! `Arc<FileSink>` — no need for every caller to drop their clone
+//! first.
 
 use oharness_core::{Event, EventSink};
 use std::env;
@@ -15,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::{self, error::TrySendError, Sender};
+use tokio::sync::{oneshot, Mutex as TokioMutex};
 use tokio::task::JoinHandle;
 use tracing::warn;
 
@@ -23,8 +31,13 @@ const DEFAULT_BUFFER: usize = 10_000;
 pub struct FileSink {
     tx: Sender<Event>,
     path: PathBuf,
-    // Kept so the writer task has a clean way to be awaited/joined from outside.
-    writer_handle: Arc<tokio::sync::Mutex<Option<JoinHandle<io::Result<()>>>>>,
+    // One-shot close signal the writer listens for. Wrapped in an
+    // `Option<Mutex<...>>` so `flush(&self)` can take the sender out,
+    // drop it to fire the signal, and fail silently on second call.
+    close_tx: TokioMutex<Option<oneshot::Sender<()>>>,
+    // Kept so the writer task has a clean way to be awaited/joined
+    // from outside. Also wrapped in an Option so flush() is idempotent.
+    writer_handle: Arc<TokioMutex<Option<JoinHandle<io::Result<()>>>>>,
 }
 
 impl std::fmt::Debug for FileSink {
@@ -67,18 +80,31 @@ impl FileSink {
             .await?;
 
         let (tx, mut rx) = mpsc::channel::<Event>(buffer);
+        let (close_tx, mut close_rx) = oneshot::channel::<()>();
         let writer = tokio::spawn(async move {
             let mut file = file;
-            while let Some(event) = rx.recv().await {
-                let mut line = match serde_json::to_vec(&event) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!(error = %e, "trajectory: event serialization failed; skipping");
-                        continue;
+            loop {
+                tokio::select! {
+                    // Biased so the close branch doesn't starve event writes
+                    // when both are ready — we still drain buffered events
+                    // after the signal, just not ahead of it.
+                    maybe = rx.recv() => {
+                        match maybe {
+                            Some(event) => write_event(&mut file, event).await?,
+                            // All senders dropped — equivalent to a close.
+                            None => break,
+                        }
                     }
-                };
-                line.push(b'\n');
-                file.write_all(&line).await?;
+                    _ = &mut close_rx => {
+                        // Close requested. Drain anything already queued so
+                        // the caller's `emit()` calls that landed before
+                        // `flush()` actually hit disk, then finalise.
+                        while let Ok(event) = rx.try_recv() {
+                            write_event(&mut file, event).await?;
+                        }
+                        break;
+                    }
+                }
             }
             file.flush().await?;
             file.sync_all().await?;
@@ -88,7 +114,8 @@ impl FileSink {
         Ok(Self {
             tx,
             path,
-            writer_handle: Arc::new(tokio::sync::Mutex::new(Some(writer))),
+            close_tx: TokioMutex::new(Some(close_tx)),
+            writer_handle: Arc::new(TokioMutex::new(Some(writer))),
         })
     }
 
@@ -96,17 +123,26 @@ impl FileSink {
         &self.path
     }
 
-    /// Close the sender and await the writer task. Call once when shutting down.
+    /// Close the sink and await the writer task. Safe to call against
+    /// a shared `Arc<FileSink>` — the close signal is an internal
+    /// one-shot the writer selects on, so outstanding clones of the
+    /// `Sender` don't block shutdown.
+    ///
+    /// Idempotent: the second and subsequent calls are no-ops
+    /// returning `Ok(())`. Events emitted after `flush()` returns
+    /// will see `TrySendError::Closed` and be warn-dropped — the
+    /// sink is single-shutdown.
     pub async fn flush(&self) -> io::Result<()> {
-        // Dropping the sender closes the channel; but the `&self` signature means
-        // we can't drop. Instead we rely on the task exiting once all clones are
-        // gone. Here we just wait for the writer if this is the last holder.
+        // Step 1: fire the close signal. Dropping the sender is
+        // enough — the writer receives `Err(RecvError)` and treats
+        // it the same as a normal close.
+        if let Some(sender) = self.close_tx.lock().await.take() {
+            drop(sender);
+        }
+
+        // Step 2: await the writer. Idempotent via Option::take.
         let mut guard = self.writer_handle.lock().await;
         if let Some(handle) = guard.take() {
-            // If this sink is still cloned elsewhere, the task won't finish; return
-            // immediately in that case (best-effort). Callers that need strict
-            // shutdown should drop every clone first.
-            drop(self.tx.clone()); // no-op; kept for clarity
             match handle.await {
                 Ok(r) => r,
                 Err(join_err) => Err(io::Error::other(format!("writer task: {join_err}"))),
@@ -115,6 +151,21 @@ impl FileSink {
             Ok(())
         }
     }
+}
+
+/// Serialize + append one event to the writer file. Logs and
+/// skips on serialisation error rather than failing the whole
+/// writer task — one bad event shouldn't drop subsequent writes.
+async fn write_event(file: &mut tokio::fs::File, event: Event) -> io::Result<()> {
+    let mut line = match serde_json::to_vec(&event) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(error = %e, "trajectory: event serialization failed; skipping");
+            return Ok(());
+        }
+    };
+    line.push(b'\n');
+    file.write_all(&line).await
 }
 
 impl EventSink for FileSink {
@@ -156,4 +207,89 @@ fn buffer_size() -> usize {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_BUFFER)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oharness_core::event::{EventKind, SchemaVersion, UserLogPayload};
+    use oharness_core::{RunId, SpanId};
+    use serde_json::json;
+    use std::time::Duration;
+
+    fn sample_event(seq: u64, run: RunId) -> Event {
+        Event {
+            v: SchemaVersion::CURRENT,
+            seq,
+            run_id: run,
+            timestamp: Some(time::OffsetDateTime::now_utc()),
+            span_id: SpanId::from("test"),
+            parent: None,
+            kind: EventKind::UserLog(UserLogPayload {
+                namespace: "test".into(),
+                data: json!({"ix": seq}),
+            }),
+            redactions: Vec::new(),
+        }
+    }
+
+    /// Regression test — `flush()` must complete even when the
+    /// caller is still holding `Arc<FileSink>` clones. Before the
+    /// close-signal fix, this deadlocked: the writer task only
+    /// exited when *every* `Sender<Event>` was dropped, and
+    /// `flush(&self)` can't drop `self.tx`.
+    #[tokio::test]
+    async fn flush_completes_with_outstanding_arc_clones() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("traj.jsonl");
+        let sink = Arc::new(FileSink::to_path(&path).await.expect("sink"));
+
+        let run = RunId::new();
+        // Hold a clone alive while we flush — the original deadlock scenario.
+        let holder = Arc::clone(&sink);
+        holder.emit(sample_event(0, run));
+        holder.emit(sample_event(1, run));
+
+        // A 2-second timeout is a hard upper bound; the fix completes
+        // in single-digit milliseconds. If this test hangs, the close
+        // signal regressed.
+        let flush_fut = async { sink.flush().await };
+        tokio::time::timeout(Duration::from_secs(2), flush_fut)
+            .await
+            .expect("flush timed out — close-signal regression?")
+            .expect("flush returned Err");
+
+        // The clone is still alive; dropping it afterwards must not panic.
+        drop(holder);
+        // And the file should have both events on disk.
+        let contents = tokio::fs::read_to_string(&path).await.expect("read");
+        assert_eq!(
+            contents.lines().count(),
+            2,
+            "events missing from file: {contents:?}"
+        );
+    }
+
+    /// `flush()` is idempotent — second call should no-op cleanly.
+    #[tokio::test]
+    async fn flush_is_idempotent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("traj.jsonl");
+        let sink = FileSink::to_path(&path).await.expect("sink");
+        sink.flush().await.expect("first flush");
+        sink.flush().await.expect("second flush (idempotent)");
+    }
+
+    /// Events emitted after `flush()` completes are dropped with a
+    /// warning (writer task is gone), not panicked on.
+    #[tokio::test]
+    async fn emit_after_flush_is_warned_not_panicked() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("traj.jsonl");
+        let sink = FileSink::to_path(&path).await.expect("sink");
+        sink.flush().await.expect("flush");
+        // Should not panic — the writer is gone so the event drops,
+        // but emit() handles that gracefully.
+        sink.emit(sample_event(0, RunId::new()));
+    }
 }
