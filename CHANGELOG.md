@@ -11,6 +11,64 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 ## [Unreleased]
 
 ### Added
+- **M4 security audit — `docs/security.md` + BashTool hardening**
+  (plan §21.1 / remaining-work §5 gate). The audit closes the
+  plan's "security review of `bash`" M4 gate. Three concrete
+  library mitigations landed alongside the audit document.
+  - **`docs/security.md`** — the trust model, per-tool risk
+    inventory, mitigation status, deployer recommendations,
+    deferred hardening (post-v1.0), and security-reporting
+    process. The document is explicit about what open-harness
+    *is* (a research framework, not a sandbox) and what it's
+    *not* (safe against adversarial LLM output without an
+    external isolation layer). Includes a per-risk table for
+    `BashToolSet` + `FsToolSet` with severity / status columns
+    users can audit in one glance.
+  - **`BashTool::with_env_allowlist(..)`** — opt-in env-var
+    filtering. When set, the subprocess starts with a cleared
+    environment and only the named variables are copied over
+    from the parent. Default (None) preserves full-env
+    inheritance so existing callers keep working. Recommended
+    for eval / CI: `["PATH", "HOME", "USER", "SHELL", "LANG"]`
+    — enough for most tools, nothing sensitive. Hides
+    `*_API_KEY`, `AWS_*`, `ANTHROPIC_*`, SSH agent sockets,
+    etc. from the subprocess.
+  - **Cancellation during execution** — the bash tool now
+    races the child process against `ctx.cancellation` via
+    `tokio::select!`. Previously the cancellation token was
+    checked once at the start and never again; a long-running
+    command couldn't be stopped by the agent loop. Now a
+    `cancellation.cancel()` call mid-execution returns
+    `ToolOutcome::Cancelled` in under a second.
+  - **Windows / platform note** — `/bin/bash` is still
+    hard-coded; Windows behaviour is explicitly called out in
+    `docs/security.md §2.1`. A `cmd.exe /c` variant is a
+    future addition, tracked in the deferred-hardening
+    section.
+  - 6 new unit tests in `oharness-tools/src/bash.rs`: happy
+    path, timeout no-longer-leaks, cancellation-interrupts-running,
+    env allowlist hides secrets, no-allowlist inherits env,
+    64KiB output truncation. 239 workspace tests on
+    --all-features (was 233; +6 new).
+
+### Fixed
+- **BashTool timeout leaked the subprocess** — when
+  `timeout(..)` fired, the future was dropped but tokio's
+  `Command::kill_on_drop(false)` default meant the spawned
+  `/bin/bash` kept running in the background. A `sleep 3600 &`
+  with `timeout_secs = 1` would survive the agent run
+  entirely. `kill_on_drop(true)` is now set so the child
+  receives `SIGKILL` when the enclosing future drops.
+- **Bash subprocess inherited parent stdio** — the rewrite
+  for cancellation uncovered that `Command::spawn` without
+  explicit `Stdio::piped()` inherits the parent's stdout /
+  stderr (unlike `Command::output()` which pipes
+  automatically). Output was leaking into the harness's own
+  stdio and not being captured. Fixed by explicitly piping
+  both stdout and stderr, and nulling stdin so commands like
+  `cat` don't block on input that never arrives.
+
+### Added
 - **M4 publish prep** — crates.io metadata polish + per-crate
   READMEs + release procedure. Gets the workspace to a
   legitimately releasable state (plan §21.1 "Publish" gate).
