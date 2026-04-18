@@ -5,8 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
-description = "ToolSet trait and bundled tool kits for open-harness"
+description = "ToolSet trait and bundled tool kits (bash, filesystem) for open-harness"
+readme = "README.md"
+keywords = ["agent", "tools", "llm", "bash", "filesystem"]
+categories = ["development-tools", "api-bindings"]
 
 [lints]
 workspace = true

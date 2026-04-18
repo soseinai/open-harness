@@ -5,8 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 description = "Pluggable memory/context strategies for open-harness"
+readme = "README.md"
+keywords = ["memory", "llm", "agent", "context"]
+categories = ["development-tools"]
 
 [lints]
 workspace = true

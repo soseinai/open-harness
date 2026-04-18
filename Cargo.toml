@@ -26,7 +26,12 @@ edition = "2021"
 rust-version = "1.82"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/aishfenton/open-harness"
+homepage = "https://github.com/aishfenton/open-harness"
 authors = ["open-harness contributors"]
+# Per-crate `description`, `keywords`, `categories`, and
+# `readme = "README.md"` are set in each crate's own Cargo.toml
+# (crates.io shows those on the crate page). `documentation` is left
+# for cargo to derive from the `name` (defaults to docs.rs/<name>).
 
 [workspace.lints.rust]
 warnings = "deny"

@@ -5,8 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
-description = "Agent + Loop trait + ReactLoop for open-harness"
+description = "Agent, Loop trait, ReactLoop, ConversationLoop, and run_reflexion for open-harness"
+readme = "README.md"
+keywords = ["agent", "react", "reflexion", "llm", "loop"]
+categories = ["api-bindings", "asynchronous"]
 
 [lints]
 workspace = true

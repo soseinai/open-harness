@@ -5,8 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 description = "Benchmark runner + TaskEvaluator re-export for open-harness"
+readme = "README.md"
+keywords = ["eval", "benchmark", "llm", "agent"]
+categories = ["development-tools::testing", "science"]
 
 [lints]
 workspace = true

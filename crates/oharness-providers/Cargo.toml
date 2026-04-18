@@ -5,8 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
-description = "Feature-gated LLM provider adapters for open-harness"
+description = "LLM provider adapters (Anthropic, OpenAI, OpenRouter, Ollama, vLLM) for open-harness"
+readme = "README.md"
+keywords = ["anthropic", "openai", "llm", "provider"]
+categories = ["api-bindings", "asynchronous"]
 
 [lints]
 workspace = true

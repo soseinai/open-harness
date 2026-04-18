@@ -5,8 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
-description = "Budget middleware and shipped BudgetHandle implementations for open-harness"
+description = "Budget middleware (token, step, cost, time) for open-harness"
+readme = "README.md"
+keywords = ["budget", "llm", "tokens", "cost", "agent"]
+categories = ["api-bindings", "development-tools"]
 
 [lints]
 workspace = true

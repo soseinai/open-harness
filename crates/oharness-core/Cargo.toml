@@ -5,8 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 description = "Core types, event schema, and context-plumbing traits for open-harness"
+readme = "README.md"
+keywords = ["llm", "agent", "schema", "events", "research"]
+categories = ["development-tools", "science"]
 
 [lints]
 workspace = true

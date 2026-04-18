@@ -5,8 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
-description = "EventSink implementations, trajectory writer/reader for open-harness"
+description = "Event sinks, trajectory JSONL writer/reader, and ReplayLlm for open-harness"
+readme = "README.md"
+keywords = ["trace", "events", "jsonl", "llm", "observability"]
+categories = ["development-tools::debugging", "asynchronous"]
 
 [lints]
 workspace = true

@@ -11,6 +11,41 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 ## [Unreleased]
 
 ### Added
+- **M4 publish prep** — crates.io metadata polish + per-crate
+  READMEs + release procedure. Gets the workspace to a
+  legitimately releasable state (plan §21.1 "Publish" gate).
+  - **Per-crate metadata** — every publishable crate's
+    `Cargo.toml` now carries `description`, `keywords` (≤5),
+    `categories` (from crates.io's category list), `readme =
+    "README.md"`, plus `homepage` inherited from a new
+    `[workspace.package].homepage = "..."` entry.
+  - **Per-crate `README.md`** — 11 new READMEs (one per
+    publishable crate; `oharness-py` already had one). Each is
+    ~40 LOC and follows the same shape: what the crate is, what's
+    in it, a minimal quickstart, relevant feature flags,
+    dual-license note. These are what crates.io renders on the
+    crate's page.
+  - **`RELEASE.md`** — maintainer-facing release procedure.
+    Pre-flight checks (CHANGELOG, `just ci`, `just examples`,
+    schema drift), the linearised publish order (11 crates in
+    topological dependency order because cargo can't dry-run
+    downstream crates until upstream is published), GitHub tag
+    + release notes, `maturin build` + `twine upload` for the
+    Python wheel, post-flight version-bump housekeeping, and a
+    troubleshooting list of the errors publish-prep actually
+    surfaces (missing `description`, bad `readme` path, license
+    mismatches).
+  - **Dry-run validated**: `cargo publish --dry-run` passes
+    end-to-end for `oharness-core` (the root of the dep graph;
+    all others are blocked by the unpublished-path-deps cargo
+    limitation). `cargo package --list` confirms all 11 crates
+    package cleanly: total file counts land at 10–29 per crate
+    (the 29 is `oharness-loop` with its 11 runnable examples).
+  - `oharness-py` intentionally retains `publish = false` —
+    it ships via PyPI as the `oharness` wheel, not crates.io.
+    The Python package will be published separately via
+    `maturin build --release` + `twine upload` per
+    `RELEASE.md §3`.
 - **M4 examples-in-CI batch 2** (plan §18.3 / remaining-work §5).
   Five more runnable examples in
   `crates/oharness-loop/examples/`, each smoke-run in `just ci`

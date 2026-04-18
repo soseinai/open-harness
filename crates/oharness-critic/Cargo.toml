@@ -5,8 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 description = "Critic / Reflector traits, composition, and shipped impls for open-harness"
+readme = "README.md"
+keywords = ["critic", "reflection", "llm", "agent", "reflexion"]
+categories = ["api-bindings"]
 
 [lints]
 workspace = true
