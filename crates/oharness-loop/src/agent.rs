@@ -9,6 +9,7 @@ use oharness_core::{
 use oharness_critic::{CompositeCritic, CriticTrigger, ReflectionInjector};
 use oharness_llm::Llm;
 use oharness_memory::{MemoryPolicy, Passthrough};
+use oharness_tools::context::Workspace;
 use oharness_tools::ToolSet;
 use oharness_trace::{InMemorySink, RequestTracer, ToolTracer};
 use std::sync::atomic::AtomicU64;
@@ -24,6 +25,13 @@ pub struct Agent {
     approval: Arc<dyn ApprovalChannel>,
     critics: Option<Arc<CompositeCritic>>,
     critic_trigger: CriticTrigger,
+    /// Optional scratch [`Workspace`]. Propagated into
+    /// `LoopContext.workspace` and from there into every
+    /// `ToolContext` the loop constructs, so the shipped `fs` /
+    /// `bash` tools scope to the agent's workspace rather than cwd.
+    /// Benchmark adapters (e.g. `oharness-bench-swe`) populate this
+    /// from their `LoadedTask.workspace` in the agent factory.
+    workspace: Option<Arc<Workspace>>,
     /// Handle stashed for `run_reflexion` — `None` if the builder wasn't
     /// given a [`ReflectionInjector`]. The injector itself (if present)
     /// is also wired into the Llm middleware stack before the agent's
@@ -68,6 +76,10 @@ impl Agent {
         self.critic_trigger
     }
 
+    pub fn workspace(&self) -> Option<&Arc<Workspace>> {
+        self.workspace.as_ref()
+    }
+
     pub async fn run(&self, task: Task) -> Result<RunOutcome, AgentError> {
         let run_id = RunId::new();
         let seq = Arc::new(AtomicU64::new(0));
@@ -99,6 +111,7 @@ impl Agent {
             budget: self.budget.clone(),
             cancellation: Cancellation::new(),
             approval: self.approval.clone(),
+            workspace: self.workspace.clone(),
             revision_depth_cap: self.config.revision_depth_cap,
             max_turns: self.config.max_turns,
         };
@@ -122,6 +135,7 @@ pub struct AgentBuilder {
     critics: Option<Arc<CompositeCritic>>,
     critic_trigger: Option<CriticTrigger>,
     reflection_injector: Option<Arc<ReflectionInjector>>,
+    workspace: Option<Arc<Workspace>>,
     config: AgentConfig,
 }
 
@@ -196,6 +210,17 @@ impl AgentBuilder {
         self
     }
 
+    /// Attach a [`Workspace`] that every tool call in this agent's run
+    /// will be scoped to. The shipped `fs` / `bash` tools respect
+    /// `ToolContext::workspace_path()` — without a workspace attached,
+    /// they fall back to cwd (surprise-prone for research runs).
+    /// Benchmark adapters populate this from their `LoadedTask.workspace`
+    /// in the agent factory.
+    pub fn with_workspace(mut self, workspace: Arc<Workspace>) -> Self {
+        self.workspace = Some(workspace);
+        self
+    }
+
     pub fn build(self) -> Result<Agent, AgentError> {
         let llm = self
             .llm
@@ -237,6 +262,7 @@ impl AgentBuilder {
             critics: self.critics,
             critic_trigger: self.critic_trigger.unwrap_or_default(),
             reflection_injector: self.reflection_injector,
+            workspace: self.workspace,
             config: self.config,
         })
     }

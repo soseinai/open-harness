@@ -579,7 +579,11 @@ async fn execute_tool_calls(
                 budget: ctx.budget.clone(),
                 cancellation: ctx.cancellation.clone(),
                 approval: ctx.approval.clone(),
-                workspace: None,
+                // Thread the loop's workspace into every tool call so
+                // the shipped `fs` / `bash` tools scope to it instead
+                // of cwd. Benchmark adapters populate this by building
+                // the agent with `.with_workspace(loaded.workspace)`.
+                workspace: ctx.workspace.clone(),
                 extensions,
             };
 

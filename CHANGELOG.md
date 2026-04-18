@@ -32,6 +32,28 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **Workspace scoping through the loop** — the shipped `FsToolSet` and
+  `BashTool` were already workspace-scoped, but the loop was
+  hardcoding `ToolContext.workspace` to `None` on every tool call, so
+  the scoping never kicked in. Fixes the bug by threading a workspace
+  handle through `Agent` → `LoopContext` → `ToolContext`:
+  - `LoopContext` gains `workspace: Option<Arc<Workspace>>`.
+  - `Agent` + `AgentBuilder` gain a matching field and the new
+    `.with_workspace(Arc<Workspace>)` builder method plus a
+    `Agent::workspace()` accessor.
+  - `react.rs::execute_tool_calls` populates
+    `ToolContext.workspace` from `ctx.workspace` (instead of always
+    `None`).
+  - `ReactLoop` now scopes `fs_read` / `fs_write` / `fs_list` / `bash`
+    to `Agent`'s workspace automatically; agents without a workspace
+    fall back to cwd (unchanged M1a behaviour).
+  3 new end-to-end tests in `workspace_scoping.rs`: `fs_read` reads
+  inside the workspace, `fs_read` refuses `../`-escapes with a
+  non-recoverable tool error (and no secret leakage), and
+  agents without a workspace still read from cwd. This unblocks
+  step 2 of the SWE-bench run-it recipe in
+  `docs/remaining-work.md §3.4` — benchmark factories just call
+  `.with_workspace(loaded.workspace.unwrap())` now.
 - **M2 part 4 — `oharness-bench-swe` adapter crate** (plan §13.6). The
   first real-benchmark adapter plumbing: dataset types, git-workspace
   staging, patch apply, and FAIL_TO_PASS / PASS_TO_PASS grading. The

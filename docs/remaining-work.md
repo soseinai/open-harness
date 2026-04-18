@@ -400,11 +400,12 @@ not a coding task. Concrete steps when you want to do the run:
 
 1. Download a SWE-bench-lite dump (HuggingFace dataset viewer → JSONL
    export), point `SweBenchLite::from_jsonl(path)` at it.
-2. Provide an agent factory that builds an `Agent` whose `fs` / `bash`
-   tools are scoped to the task's `workspace.path` — the current
-   `FsToolSet` / `BashTool` don't workspace-scope paths, so you either
-   (a) wrap them in a workspace-scoping decorator, or (b) cd into the
-   workspace when spawning.
+2. Provide an agent factory that builds an `Agent` whose tools are
+   scoped to the task's `workspace.path`. The shipped `FsToolSet` and
+   `BashTool` already respect `ToolContext.workspace_path()`; call
+   `.with_workspace(loaded.workspace.unwrap())` on the builder in the
+   factory, and the runtime threads that through `Agent` →
+   `LoopContext` → `ToolContext` automatically.
 3. Each task's repo needs a Python env with the project's test deps
    installed; the reference SWE-bench uses per-task Docker images. For
    open-harness, simplest is to pre-build conda envs per (repo, version)

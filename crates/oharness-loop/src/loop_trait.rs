@@ -7,6 +7,7 @@ use oharness_core::{
 use oharness_critic::{CompositeCritic, CriticTrigger};
 use oharness_llm::Llm;
 use oharness_memory::MemoryPolicy;
+use oharness_tools::context::Workspace;
 use oharness_tools::ToolSet;
 use std::sync::Arc;
 
@@ -28,6 +29,13 @@ pub struct LoopContext {
     pub budget: Arc<dyn BudgetHandle>,
     pub cancellation: Cancellation,
     pub approval: Arc<dyn ApprovalChannel>,
+    /// Optional per-run workspace. Propagated into
+    /// `ToolContext.workspace` for every tool call so the shipped
+    /// `fs` / `bash` tools (which already consult
+    /// `ToolContext.workspace_path()`) scope filesystem access to
+    /// this directory. `None` leaves tools unscoped (they fall back
+    /// to cwd).
+    pub workspace: Option<Arc<Workspace>>,
     pub revision_depth_cap: u32,
     pub max_turns: u32,
 }
