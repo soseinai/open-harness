@@ -29,12 +29,23 @@ build:
 
 # Smoke-run the example binaries that are safe to invoke in CI (no
 # network, no disk-dirtying side effects). Tool-style examples like
-# `gen_v1_fixture` are built-but-not-run — they mutate on-disk
-# fixtures and are only run manually when the schema legitimately
-# changes.
+# `gen_v1_fixture` and `export_schema` are built-but-not-run — they
+# mutate on-disk fixtures and are only run manually when the schema
+# legitimately changes.
+#
+# Most user-facing examples live in `oharness-loop/examples/`. They
+# wire the shipped subsystems (tool calls, critics, budgets, replay,
+# reflexion) against a scripted `Llm` so CI runs them without any
+# API keys, network, or cost.
 examples:
     cargo build --workspace --examples
+    cargo build --workspace --examples --features oharness-loop/reflexion
     cargo run -p oharness-loop --example hello_scripted
+    cargo run -p oharness-loop --example react_with_tools
+    cargo run -p oharness-loop --example custom_critic
+    cargo run -p oharness-loop --example budget_enforcement
+    cargo run -p oharness-loop --example replay_trajectory
+    cargo run -p oharness-loop --example reflexion_run --features reflexion
 
 # Verify the committed Event JSON Schema matches a fresh export
 # (plan §19.2). Runs the drift test under the `schemars-export`

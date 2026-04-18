@@ -38,3 +38,14 @@ time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 futures = { workspace = true }
 tempfile = "3"
+# For the `budget_enforcement` example only — keeps the budget crate
+# out of the default dep graph.
+oharness-budget = { workspace = true }
+
+# `reflexion_run` uses the `run_reflexion` helper which is gated
+# behind the `reflexion` cargo feature; declare it explicitly so
+# `cargo run --example reflexion_run` works (and so the workspace
+# example build under `--all-features` picks it up).
+[[example]]
+name = "reflexion_run"
+required-features = ["reflexion"]

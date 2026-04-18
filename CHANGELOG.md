@@ -11,6 +11,70 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 ## [Unreleased]
 
 ### Added
+- **M4 examples-in-CI batch 1** (plan §18.3 / remaining-work §5). Five
+  new runnable examples land in `crates/oharness-loop/examples/`,
+  each built + smoke-run in `just ci` via the `just examples`
+  recipe. Plan §18.3 specifies 15 examples as the M4 gate; this
+  commit brings the count from 1 (just `hello_scripted`) to 6.
+  All five use a scripted `Llm` so CI runs them with no API key,
+  no network, and no cost — swap in `AnthropicLlm` / `OpenAiLlm`
+  and nothing else changes.
+  - **`react_with_tools`** — scripted multi-turn ReAct run that
+    actually dispatches a tool call (`fs_list` via `FsToolSet`)
+    and threads the result back. The canonical "ReAct + tool use"
+    demo sibling to `hello_scripted`.
+  - **`custom_critic`** — `NoHedgingCritic` implements the `Critic`
+    trait from scratch (scans assistant text blocks for hedge
+    phrases, emits `CriticVerdict::Reject`). Shows what the `Reject`
+    surface looks like at the loop layer: `Termination::Failed {
+    category: Critic }` + a `critic.rejected` event on the
+    trajectory. The template for user-written critics.
+  - **`budget_enforcement`** — `BudgetMiddleware::new(inner,
+    Arc<TokenBudget>)` caps a run at 50 input+output tokens; the
+    scripted LLM's 300-token response trips the pre-call check,
+    yielding `Termination::Failed { category: Llm }` before the
+    call actually dispatches. Shows the budget `.snapshot()` API
+    for per-task telemetry independent of the trajectory events.
+  - **`replay_trajectory`** — records an agent run into an
+    `InMemorySink`, writes the captured events to a JSONL file
+    (the on-disk format external tooling consumes), rebuilds the
+    same agent configuration against `ReplayLlm::from_events(...,
+    ReplayMode::Positional, DriftPolicy::default())`, re-runs,
+    and asserts every `RunOutcome` field matches. Demonstrates
+    bit-for-bit reproducibility without provider API keys or
+    dollars — the paper-supplement workflow.
+  - **`reflexion_run`** — `run_reflexion` over 5 max episodes with
+    a `NudgeReflector` that emits "be concrete, say 'done!'" and a
+    `FinishedEvaluator` that fails unless the assistant's final
+    message contains "done". Scripts three LLM responses (two
+    hedging, one that says "done!"); the loop iterates exactly 3
+    episodes before the evaluator passes and stops the sweep.
+    Each episode's `prior_reflections.len()` prints as evidence
+    the notes feed forward via `ReflectionInjector`. Gated behind
+    the `reflexion` feature via `required-features` in
+    `Cargo.toml`, so `cargo run --example reflexion_run -p
+    oharness-loop --features reflexion` is the invocation.
+  - Two library fixes surfaced by writing the examples:
+    - `impl<T: RequestLayer + ?Sized> RequestLayer for Arc<T>` (+
+      symmetric `ResponseLayer` impl). The docs on
+      `Agent::with_reflection_injector` promised
+      `LlmExt::with_request_layer(injector.clone())` would work
+      with `Arc<ReflectionInjector>`, but no blanket impl existed.
+      Four-line fix in `crates/oharness-llm/src/layer.rs`; now the
+      documented idiom compiles.
+    - `justfile` `examples:` recipe grows the five `cargo run`
+      invocations + a second `cargo build --examples
+      --features oharness-loop/reflexion` line to catch any
+      feature-gated build regression that the default-feature
+      build would miss.
+  - **Spawned as a follow-up** (separate chip in the task sidebar):
+    `FileSink::flush` deadlocks if any `Arc<FileSink>` clone is
+    alive when flush is called, because the underlying writer
+    task only exits when all senders drop. The `replay_trajectory`
+    example had to work around this by using `InMemorySink` +
+    `serde_json::to_string` to disk; once the flush fix lands,
+    the example will revert to `FileSink::to_path` + `flush()`.
+  230 workspace tests on `--all-features` still green.
 - **M3 part 4: `oharness-py` adapters for `RequestLayer` +
   `ResponseLayer`** (plan §14.2). Middleware traits complete the
   v1 Python surface — nine of the ten plan-§14.2 traits are now

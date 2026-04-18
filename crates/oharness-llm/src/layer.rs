@@ -41,6 +41,18 @@ pub trait RequestLayer: Send + Sync {
     fn on_request(&self, req: &mut CompletionRequest);
 }
 
+/// A shared layer handle forwards to the inner type. This lets users
+/// share one layer instance between the LLM middleware stack and an
+/// external holder — canonically, `ReflectionInjector` between the
+/// request-layer chain and `Agent::with_reflection_injector`. Without
+/// this blanket impl, `with_request_layer(Arc::clone(&injector))`
+/// wouldn't compile.
+impl<T: RequestLayer + ?Sized> RequestLayer for std::sync::Arc<T> {
+    fn on_request(&self, req: &mut CompletionRequest) {
+        (**self).on_request(req)
+    }
+}
+
 /// Mutate `CompletionResponse` values returned by `complete()`. Streaming
 /// behaviour is configured via [`ResponseLayer::stream_mode`].
 pub trait ResponseLayer: Send + Sync {
@@ -61,6 +73,22 @@ pub trait ResponseLayer: Send + Sync {
     /// to a more informative string when helpful.
     fn name(&self) -> &'static str {
         std::any::type_name::<Self>()
+    }
+}
+
+/// Symmetric to the `RequestLayer` impl for `Arc<T>`. Forwards all
+/// three methods so shared response layers (e.g., a redaction layer
+/// held by a supervisor process) work seamlessly with
+/// `LlmExt::with_response_layer(shared.clone())`.
+impl<T: ResponseLayer + ?Sized> ResponseLayer for std::sync::Arc<T> {
+    fn on_response(&self, res: &mut CompletionResponse) {
+        (**self).on_response(res)
+    }
+    fn stream_mode(&self) -> ResponseLayerStreamMode {
+        (**self).stream_mode()
+    }
+    fn name(&self) -> &'static str {
+        (**self).name()
     }
 }
 
