@@ -1,0 +1,1839 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Event",
+  "description": "Top-level event envelope. Every event — lifecycle, LLM, tool, memory, etc. — is wrapped in this struct. Spans are represented by two events sharing a `span_id`.",
+  "type": "object",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "meta"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/MetaPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "run.started"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/RunStartedPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "run.finished"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/RunFinishedPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "turn.started"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/TurnPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "turn.finished"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/TurnFinishedPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "turn.revised"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/TurnRevisedPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "llm.request"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/LlmRequestPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "llm.response"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/LlmResponsePayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "llm.stream.chunk"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "llm.retry"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/LlmRetryPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "llm.failed"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/LlmFailedPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool.call.started"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/ToolCallStartedPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool.call.finished"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/ToolCallFinishedPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool.call.failed"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/ToolCallFailedPayload"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool.approval.requested"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tool.approval.decided"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "memory.evicted"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "memory.summarized"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "memory.retrieved"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "budget.exceeded"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "policy.input.checked"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "policy.output.checked"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "policy.blocked"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "planner.proposed"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "planner.revised"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "planner.committed"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "critic.assessed"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "critic.rejected"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "critic.revised"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "critic.failed"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "reflection.generated"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "reflection.injected"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "human.interrupt"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "human.inject"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "user.simulated.message"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "user.simulated.ended"
+          ]
+        },
+        "payload": true
+      }
+    },
+    {
+      "description": "Escape hatch for user-defined events. Namespace MUST NOT start with a built-in category prefix. Construct via `EventKind::user_log`.",
+      "type": "object",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "user.log"
+          ]
+        },
+        "payload": {
+          "$ref": "#/definitions/UserLogPayload"
+        }
+      }
+    },
+    {
+      "description": "Forward-compat fallback: unknown event type preserved verbatim.",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "unknown"
+          ]
+        }
+      }
+    }
+  ],
+  "required": [
+    "run_id",
+    "seq",
+    "span_id",
+    "v"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "#/definitions/SchemaVersion"
+    },
+    "seq": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "run_id": {
+      "$ref": "#/definitions/RunId"
+    },
+    "timestamp": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "span_id": {
+      "type": "string"
+    },
+    "parent": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "definitions": {
+    "SchemaVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "RunId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "MetaPayload": {
+      "type": "object",
+      "required": [
+        "harness_version",
+        "llm_capabilities",
+        "schema_version",
+        "task_snapshot"
+      ],
+      "properties": {
+        "schema_version": {
+          "$ref": "#/definitions/SchemaVersion"
+        },
+        "harness_version": {
+          "type": "string"
+        },
+        "task_snapshot": {
+          "$ref": "#/definitions/Task"
+        },
+        "llm_capabilities": {
+          "$ref": "#/definitions/LlmCapabilities"
+        }
+      }
+    },
+    "Task": {
+      "description": "Pure data description of a task. No behaviour, no closures. Success predicates live in `TaskEvaluator`.",
+      "type": "object",
+      "required": [
+        "instruction"
+      ],
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Attachment"
+          }
+        },
+        "metadata": {
+          "description": "Reverse-DNS-namespaced keys. Unknown keys round-trip.",
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "Attachment": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "content",
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "text"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "name",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "file"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "bytes",
+            "kind",
+            "mime",
+            "name"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "inline"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "mime": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0.0
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "url"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "url"
+              ]
+            },
+            "url": {
+              "type": "string"
+            },
+            "mime_hint": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "LlmCapabilities": {
+      "type": "object",
+      "required": [
+        "max_context_tokens",
+        "max_output_tokens",
+        "parallel_tool_use",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "thinking",
+        "vision"
+      ],
+      "properties": {
+        "streaming": {
+          "type": "boolean"
+        },
+        "prompt_caching": {
+          "type": "boolean"
+        },
+        "parallel_tool_use": {
+          "type": "boolean"
+        },
+        "vision": {
+          "type": "boolean"
+        },
+        "thinking": {
+          "type": "boolean"
+        },
+        "structured_output": {
+          "type": "boolean"
+        },
+        "max_context_tokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "RunStartedPayload": {
+      "type": "object",
+      "properties": {
+        "extra": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "RunFinishedPayload": {
+      "type": "object",
+      "required": [
+        "termination",
+        "tool_calls",
+        "turns"
+      ],
+      "properties": {
+        "termination": {
+          "type": "string"
+        },
+        "turns": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "tool_calls": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "extra": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "TurnPayload": {
+      "type": "object",
+      "required": [
+        "turn_index"
+      ],
+      "properties": {
+        "turn_index": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "TurnFinishedPayload": {
+      "type": "object",
+      "required": [
+        "stop_reason",
+        "tool_calls",
+        "turn_index",
+        "usage"
+      ],
+      "properties": {
+        "turn_index": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "stop_reason": {
+          "$ref": "#/definitions/StopReason"
+        },
+        "usage": {
+          "$ref": "#/definitions/Usage"
+        },
+        "tool_calls": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "StopReason": {
+      "description": "Reason a model stopped producing output. `Error(String)` wraps provider-specific error reasons that don't map to a known variant.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "end_turn"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "max_tokens"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "stop_sequence"
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "tool_use"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "refusal"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "error"
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "Usage": {
+      "description": "Token accounting for a single completion. Fields default to zero so providers that don't report cache figures can leave them untouched.",
+      "type": "object",
+      "required": [
+        "tokens_input",
+        "tokens_output"
+      ],
+      "properties": {
+        "tokens_input": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tokens_output": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tokens_cache_read": {
+          "default": 0,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tokens_cache_create": {
+          "default": 0,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "TurnRevisedPayload": {
+      "type": "object",
+      "required": [
+        "original_seq",
+        "reason",
+        "replacement_seq"
+      ],
+      "properties": {
+        "original_seq": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "replacement_seq": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "LlmRequestPayload": {
+      "type": "object",
+      "required": [
+        "request"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/CompletionRequest"
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "CompletionRequest": {
+      "type": "object",
+      "required": [
+        "messages"
+      ],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Message"
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ToolSpec"
+          }
+        },
+        "system": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "stop_sequences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cache_hints": {
+          "$ref": "#/definitions/CacheHints"
+        },
+        "extensions": {
+          "description": "Provider extensions, reverse-DNS-namespaced (e.g. `anthropic.thinking`).",
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "Message": {
+      "description": "A conversation message. Three roles; assistant turns carry a stop reason.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "content",
+            "role"
+          ],
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system"
+              ]
+            },
+            "content": {
+              "type": "string"
+            },
+            "meta": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "content",
+            "role"
+          ],
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "user"
+              ]
+            },
+            "content": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Content"
+              }
+            },
+            "meta": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "content",
+            "role"
+          ],
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Content"
+              }
+            },
+            "stop_reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StopReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "meta": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    },
+    "Content": {
+      "description": "A single content block inside a message.\n\nAll variants are struct-shaped so the enum round-trips cleanly through serde's `#[serde(tag = \"type\")]` representation — serde refuses to serialize tagged newtype variants that wrap a primitive, which would otherwise silently break `llm.request` / `llm.response` event payloads.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "text",
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "text"
+              ]
+            },
+            "text": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "input",
+            "name",
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "tool_use"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "input": true
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "output",
+            "tool_use_id",
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "tool_result"
+              ]
+            },
+            "tool_use_id": {
+              "type": "string"
+            },
+            "output": {
+              "$ref": "#/definitions/ToolOutput"
+            },
+            "is_error": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "description": "Extended-thinking blocks (Anthropic).",
+          "type": "object",
+          "required": [
+            "thinking",
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "thinking"
+              ]
+            },
+            "thinking": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "Reference to an image — inline bytes, URL, or file path. Research annotations live in `extensions` (reverse-DNS namespaced).",
+          "type": "object",
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "url"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "extensions": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "path"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "extensions": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "bytes",
+                "mime"
+              ],
+              "properties": {
+                "mime": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0.0
+                  }
+                },
+                "extensions": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          ],
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "image"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "url"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "mime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "extensions": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "path"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "extensions": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "bytes",
+                "mime"
+              ],
+              "properties": {
+                "mime": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0.0
+                  }
+                },
+                "extensions": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          ],
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "document"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "url"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "extensions": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "path"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "extensions": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "bytes",
+                "mime"
+              ],
+              "properties": {
+                "mime": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0.0
+                  }
+                },
+                "extensions": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          ],
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "audio"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "source",
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "citation"
+              ]
+            },
+            "source": {
+              "type": "string"
+            },
+            "quoted_text": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "extensions": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    },
+    "ToolOutput": {
+      "description": "Structured output of a tool call. Tools can return rich content (text, images, etc.).",
+      "type": "object",
+      "required": [
+        "content"
+      ],
+      "properties": {
+        "content": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Content"
+          }
+        },
+        "truncated": {
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "ToolSpec": {
+      "type": "object",
+      "required": [
+        "description",
+        "input_schema",
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "input_schema": {
+          "description": "JSON Schema for the tool's input. Never transformed — round-trips verbatim."
+        }
+      }
+    },
+    "CacheHints": {
+      "type": "object",
+      "properties": {
+        "breakpoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CacheBreakpoint"
+          }
+        }
+      }
+    },
+    "CacheBreakpoint": {
+      "type": "object",
+      "required": [
+        "message_index"
+      ],
+      "properties": {
+        "message_index": {
+          "description": "Message index at which to mark a cache point (inclusive upper bound of the cacheable prefix).",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "ttl": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CacheTtl"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CacheTtl": {
+      "type": "string",
+      "enum": [
+        "short",
+        "long"
+      ]
+    },
+    "LlmResponsePayload": {
+      "type": "object",
+      "required": [
+        "response"
+      ],
+      "properties": {
+        "response": {
+          "$ref": "#/definitions/CompletionResponse"
+        }
+      }
+    },
+    "CompletionResponse": {
+      "type": "object",
+      "required": [
+        "content",
+        "id",
+        "model",
+        "stop_reason",
+        "usage"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "content": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Content"
+          }
+        },
+        "stop_reason": {
+          "$ref": "#/definitions/StopReason"
+        },
+        "usage": {
+          "$ref": "#/definitions/Usage"
+        }
+      }
+    },
+    "LlmRetryPayload": {
+      "type": "object",
+      "required": [
+        "attempt",
+        "reason"
+      ],
+      "properties": {
+        "attempt": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "LlmFailedPayload": {
+      "type": "object",
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "ToolCallStartedPayload": {
+      "type": "object",
+      "required": [
+        "input",
+        "tool_name",
+        "tool_use_id"
+      ],
+      "properties": {
+        "tool_name": {
+          "type": "string"
+        },
+        "tool_use_id": {
+          "type": "string"
+        },
+        "input": true
+      }
+    },
+    "ToolCallFinishedPayload": {
+      "type": "object",
+      "required": [
+        "output",
+        "tool_name",
+        "tool_use_id"
+      ],
+      "properties": {
+        "tool_name": {
+          "type": "string"
+        },
+        "tool_use_id": {
+          "type": "string"
+        },
+        "output": true,
+        "truncated": {
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "ToolCallFailedPayload": {
+      "type": "object",
+      "required": [
+        "reason",
+        "tool_name",
+        "tool_use_id"
+      ],
+      "properties": {
+        "tool_name": {
+          "type": "string"
+        },
+        "tool_use_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "recoverable": {
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "UserLogPayload": {
+      "type": "object",
+      "required": [
+        "namespace"
+      ],
+      "properties": {
+        "namespace": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

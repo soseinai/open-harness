@@ -8,6 +8,7 @@ use url::Url;
 /// Pure data description of a task. No behaviour, no closures. Success predicates
 /// live in `TaskEvaluator`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -44,6 +45,7 @@ impl Task {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Attachment {
     Text {
@@ -52,6 +54,7 @@ pub enum Attachment {
     },
     File {
         name: String,
+        #[cfg_attr(feature = "schemars-export", schemars(with = "String"))]
         path: PathBuf,
     },
     Inline {
@@ -60,6 +63,7 @@ pub enum Attachment {
         bytes: Vec<u8>,
     },
     Url {
+        #[cfg_attr(feature = "schemars-export", schemars(with = "String"))]
         url: Url,
         mime_hint: Option<String>,
     },

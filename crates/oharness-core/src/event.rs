@@ -46,9 +46,31 @@ impl<'de> Deserialize<'de> for SchemaVersion {
     }
 }
 
+#[cfg(feature = "schemars-export")]
+impl schemars::JsonSchema for SchemaVersion {
+    fn schema_name() -> String {
+        "SchemaVersion".into()
+    }
+    fn json_schema(_: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        // Serialized as "MAJOR.MINOR" (see Serialize / Deserialize
+        // above). Pin the pattern so schema consumers reject malformed
+        // values rather than accepting any string.
+        schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                pattern: Some(r"^\d+\.\d+$".into()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 /// Top-level event envelope. Every event — lifecycle, LLM, tool, memory, etc. — is
 /// wrapped in this struct. Spans are represented by two events sharing a `span_id`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct Event {
     pub v: SchemaVersion,
     pub seq: u64,
@@ -58,6 +80,7 @@ pub struct Event {
         skip_serializing_if = "Option::is_none",
         with = "time::serde::rfc3339::option"
     )]
+    #[cfg_attr(feature = "schemars-export", schemars(with = "Option<String>"))]
     pub timestamp: Option<OffsetDateTime>,
     pub span_id: SpanId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -93,6 +116,7 @@ impl Event {
 /// Discriminated event catalog. `type` field is the serde tag; `payload` holds the
 /// variant's data. New variants are additive per schema versioning rules.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum EventKind {
@@ -230,6 +254,7 @@ impl EventKind {
 // -- payload structs ----------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct MetaPayload {
     pub schema_version: SchemaVersion,
     pub harness_version: String,
@@ -238,12 +263,14 @@ pub struct MetaPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct RunStartedPayload {
     #[serde(default, skip_serializing_if = "MetadataMap::is_empty")]
     pub extra: MetadataMap,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct RunFinishedPayload {
     pub termination: String,
     pub turns: u32,
@@ -253,11 +280,13 @@ pub struct RunFinishedPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct TurnPayload {
     pub turn_index: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct TurnFinishedPayload {
     pub turn_index: u32,
     pub stop_reason: StopReason,
@@ -266,6 +295,7 @@ pub struct TurnFinishedPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct TurnRevisedPayload {
     pub original_seq: u64,
     pub replacement_seq: u64,
@@ -273,6 +303,7 @@ pub struct TurnRevisedPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct LlmRequestPayload {
     pub request: CompletionRequest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -280,22 +311,26 @@ pub struct LlmRequestPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct LlmResponsePayload {
     pub response: CompletionResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct LlmRetryPayload {
     pub attempt: u32,
     pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct LlmFailedPayload {
     pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct ToolCallStartedPayload {
     pub tool_name: String,
     pub tool_use_id: String,
@@ -303,6 +338,7 @@ pub struct ToolCallStartedPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct ToolCallFinishedPayload {
     pub tool_name: String,
     pub tool_use_id: String,
@@ -312,6 +348,7 @@ pub struct ToolCallFinishedPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct ToolCallFailedPayload {
     pub tool_name: String,
     pub tool_use_id: String,
@@ -321,6 +358,7 @@ pub struct ToolCallFailedPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct UserLogPayload {
     pub namespace: String,
     #[serde(flatten)]

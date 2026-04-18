@@ -13,6 +13,19 @@ Versioning:
   A major bump starts a new `v2+` line and requires compat tests against prior
   `v1.x` trajectories (see design spec §17.4).
 
+## Unreleased
+
+- **JSON Schema export landed** — `crates/oharness-core/schema/events-v1.0.json`
+  is now the authoritative, machine-checked shape for every trajectory
+  `Event`. Regenerate via `just schema-export` (or `cargo run -p
+  oharness-core --example export_schema --features schemars-export`);
+  `just ci` diffs the fresh export against the committed baseline via
+  `schema_up_to_date.rs`. Per plan §19.2, any change that alters this
+  schema MUST be accompanied by a matching `SchemaVersion::CURRENT`
+  bump + a Changelog entry in *this* file. The test is the
+  mechanical gate; the version/doc update is the governance one.
+- `EventKind` variants unchanged at schema level.
+
 ## [1.0] — 2026-04-17 (M1a)
 
 Initial schema. Envelope: `{v, seq, run_id, timestamp, span_id, parent, kind,

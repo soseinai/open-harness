@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct CompletionRequest {
     pub messages: Vec<Message>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -42,6 +43,7 @@ impl CompletionRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct CompletionResponse {
     pub id: String,
     pub model: ModelId,
@@ -53,6 +55,7 @@ pub struct CompletionResponse {
 /// Reason a model stopped producing output. `Error(String)` wraps provider-specific
 /// error reasons that don't map to a known variant.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum StopReason {
     EndTurn,
@@ -64,6 +67,7 @@ pub enum StopReason {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct ToolSpec {
     pub name: String,
     pub description: String,
@@ -72,6 +76,7 @@ pub struct ToolSpec {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct CacheHints {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub breakpoints: Vec<CacheBreakpoint>,
@@ -84,6 +89,7 @@ impl CacheHints {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct CacheBreakpoint {
     /// Message index at which to mark a cache point (inclusive upper bound of the
     /// cacheable prefix).
@@ -93,6 +99,7 @@ pub struct CacheBreakpoint {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CacheTtl {
     Short,
@@ -102,6 +109,7 @@ pub enum CacheTtl {
 /// Token accounting for a single completion. Fields default to zero so providers
 /// that don't report cache figures can leave them untouched.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct Usage {
     pub tokens_input: u64,
     pub tokens_output: u64,

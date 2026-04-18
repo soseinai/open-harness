@@ -68,5 +68,10 @@ tracing = "0.1"
 sha2 = "0.10"
 hex = "0.4"
 
+# Optional: JSON Schema export for event schema (plan §19.2). Gated per
+# crate behind a `schemars-export` feature so default builds don't pull
+# it in.
+schemars = { version = "0.8", features = ["derive", "preserve_order"] }
+
 [profile.release]
 lto = "thin"

@@ -11,6 +11,13 @@ description = "Core types, event schema, and context-plumbing traits for open-ha
 [lints]
 workspace = true
 
+[features]
+default = []
+# Plan §19.2: derive `JsonSchema` for Event + its transitive closure
+# so a script can emit the canonical schema file CI diffs against. No
+# default-on schemars dep; only `schemars-export`-gated builds pay.
+schemars-export = ["dep:schemars"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -21,3 +28,4 @@ url = { workspace = true }
 async-trait = { workspace = true }
 tokio-util = { workspace = true }
 futures = { workspace = true }
+schemars = { workspace = true, optional = true }

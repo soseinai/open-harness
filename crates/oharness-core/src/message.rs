@@ -9,6 +9,7 @@ use url::Url;
 
 /// A conversation message. Three roles; assistant turns carry a stop reason.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 #[serde(tag = "role", rename_all = "snake_case")]
 pub enum Message {
     System {
@@ -61,6 +62,7 @@ impl Message {
 /// serialize tagged newtype variants that wrap a primitive, which would
 /// otherwise silently break `llm.request` / `llm.response` event payloads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Content {
     Text {
@@ -99,6 +101,7 @@ impl Content {
 
 /// Structured output of a tool call. Tools can return rich content (text, images, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct ToolOutput {
     pub content: Vec<Content>,
     #[serde(default)]
@@ -117,14 +120,17 @@ impl ToolOutput {
 /// Reference to an image — inline bytes, URL, or file path. Research annotations live
 /// in `extensions` (reverse-DNS namespaced).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum ImageRef {
     Url {
+        #[cfg_attr(feature = "schemars-export", schemars(with = "String"))]
         url: Url,
         #[serde(default, skip_serializing_if = "MetadataMap::is_empty")]
         extensions: MetadataMap,
     },
     File {
+        #[cfg_attr(feature = "schemars-export", schemars(with = "String"))]
         path: PathBuf,
         #[serde(default, skip_serializing_if = "MetadataMap::is_empty")]
         extensions: MetadataMap,
@@ -138,15 +144,18 @@ pub enum ImageRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum DocumentRef {
     Url {
+        #[cfg_attr(feature = "schemars-export", schemars(with = "String"))]
         url: Url,
         mime: Option<String>,
         #[serde(default, skip_serializing_if = "MetadataMap::is_empty")]
         extensions: MetadataMap,
     },
     File {
+        #[cfg_attr(feature = "schemars-export", schemars(with = "String"))]
         path: PathBuf,
         #[serde(default, skip_serializing_if = "MetadataMap::is_empty")]
         extensions: MetadataMap,
@@ -160,14 +169,17 @@ pub enum DocumentRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum AudioRef {
     Url {
+        #[cfg_attr(feature = "schemars-export", schemars(with = "String"))]
         url: Url,
         #[serde(default, skip_serializing_if = "MetadataMap::is_empty")]
         extensions: MetadataMap,
     },
     File {
+        #[cfg_attr(feature = "schemars-export", schemars(with = "String"))]
         path: PathBuf,
         #[serde(default, skip_serializing_if = "MetadataMap::is_empty")]
         extensions: MetadataMap,
@@ -181,6 +193,7 @@ pub enum AudioRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct CitationRef {
     pub source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -32,6 +32,46 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **M4 plumbing part 2**: JSON Schema export for the trajectory
+  `Event` envelope (plan §19.2). The committed file
+  `crates/oharness-core/schema/events-v1.0.json` is the canonical
+  machine-readable shape; CI diffs a fresh export against it and
+  fails on any divergence.
+  - New optional `schemars` workspace dep (non-default).
+    `oharness-core` grows a `schemars-export` cargo feature gating
+    the JsonSchema derives. Default builds pay nothing for
+    `schemars`.
+  - `schemars::JsonSchema` derived via `#[cfg_attr(feature =
+    "schemars-export", derive(schemars::JsonSchema))]` on every
+    Event-reachable type: `Event`, `EventKind` (with all 36
+    variants), 13 payload structs, `Message` / `Content` (+
+    `ToolOutput` / `ImageRef` / `DocumentRef` / `AudioRef` /
+    `CitationRef`), `Task` / `Attachment`, `CompletionRequest` /
+    `CompletionResponse` / `StopReason` / `ToolSpec` / `CacheHints` /
+    `CacheBreakpoint` / `CacheTtl` / `Usage`, `LlmCapabilities`.
+    Non-derivable field types (`OffsetDateTime`, `Url`, `PathBuf`)
+    carry `#[schemars(with = "String")]` so the schema reports them
+    as strings (matching serde's wire shape).
+  - Manual `JsonSchema` impls for `SchemaVersion` (string with a
+    `^\d+\.\d+$` pattern constraint, matching its custom Serialize)
+    and `RunId` (UUID-format string). `SpanId` / `ModelId` use
+    `#[schemars(transparent)]` to inherit the inner `String` schema.
+  - `examples/export_schema.rs` regenerates the baseline and writes
+    `schema/events-v1.0.json`. The default stub-main (when feature
+    isn't enabled) `eprintln!`s the right cargo invocation and
+    exits non-zero — no silent no-op.
+  - `tests/schema_up_to_date.rs` loads the committed baseline via
+    `include_str!`, regenerates in-memory, compares. On mismatch it
+    prints a context-annotated diff (3 lines before/after the first
+    divergent line) + the correct `just schema-export` command —
+    no hand-holding required to regenerate.
+  - `just schema-check` / `just schema-export` recipes + `just ci`
+    gains `schema-check` as a mandatory stage.
+  - `CHANGELOG-schema.md` adds an "Unreleased" section noting the
+    export is live and the governance rule: any schema-affecting
+    change MUST come with a `SchemaVersion::CURRENT` bump + a
+    matching changelog entry.
+  230 tests total on `--all-features` (was 229; +1 drift test).
 - **M4 plumbing part 1**: schema-compat test, first example, pricing
   docs. Three of the M4 gates land in this commit; JSON-Schema export
   via `schemars`, examples-in-CI at the 15-file scale, and crates.io

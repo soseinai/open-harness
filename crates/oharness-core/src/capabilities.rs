@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
 pub struct LlmCapabilities {
     pub streaming: bool,
     pub prompt_caching: bool,

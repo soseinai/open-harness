@@ -10,6 +10,22 @@ use uuid::Uuid;
 #[serde(transparent)]
 pub struct RunId(pub Uuid);
 
+#[cfg(feature = "schemars-export")]
+impl schemars::JsonSchema for RunId {
+    fn schema_name() -> String {
+        "RunId".into()
+    }
+    fn json_schema(_: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        // UUID v4, rendered as the canonical 36-char hex form.
+        schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            format: Some("uuid".into()),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 impl RunId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
@@ -31,6 +47,8 @@ impl fmt::Display for RunId {
 /// Identifies a span (open/close event pair). Strings rather than UUIDs because they
 /// are meant to be human-readable: `llm-0`, `tool-3`, `run-0`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schemars-export", schemars(transparent))]
 #[serde(transparent)]
 pub struct SpanId(pub String);
 
@@ -66,6 +84,8 @@ impl From<&String> for SpanId {
 
 /// Provider-qualified model identifier, e.g. `anthropic/claude-opus-4-7`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars-export", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schemars-export", schemars(transparent))]
 #[serde(transparent)]
 pub struct ModelId(pub String);
 

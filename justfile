@@ -3,8 +3,9 @@
 
 default: ci
 
-# Lint, format-check, test, and smoke-run examples across the whole workspace.
-ci: fmt-check clippy test examples
+# Lint, format-check, test, smoke-run examples, and verify the
+# committed event schema is up-to-date.
+ci: fmt-check clippy test examples schema-check
 
 # Fail if any file isn't rustfmt-clean.
 fmt-check:
@@ -34,3 +35,18 @@ build:
 examples:
     cargo build --workspace --examples
     cargo run -p oharness-loop --example hello_scripted
+
+# Verify the committed Event JSON Schema matches a fresh export
+# (plan §19.2). Runs the drift test under the `schemars-export`
+# feature; a mismatch means someone touched the wire format without
+# regenerating `schema/events-v1.0.json` and, if appropriate,
+# bumping `SchemaVersion::CURRENT`.
+schema-check:
+    cargo test -p oharness-core --features schemars-export --test schema_up_to_date
+
+# Regenerate `crates/oharness-core/schema/events-v1.0.json` from the
+# current type graph. Run this after any intentional schema change,
+# then commit the updated file alongside the code change + a
+# CHANGELOG-schema.md entry.
+schema-export:
+    cargo run -p oharness-core --example export_schema --features schemars-export
