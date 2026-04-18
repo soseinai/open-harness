@@ -13,6 +13,12 @@ members = [
     "crates/oharness-eval",
     "crates/oharness-bench-swe",
 ]
+# `oharness-py` is intentionally excluded from workspace membership:
+# building it requires Python headers / maturin and wouldn't work in
+# every CI runner. Users build it separately via `maturin develop`
+# from `crates/oharness-py/`, or via the opt-in `just python-check`
+# recipe. Path deps from it into workspace members still resolve.
+exclude = ["crates/oharness-py"]
 
 [workspace.package]
 version = "0.1.0"

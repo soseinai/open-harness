@@ -1,4 +1,7 @@
 /target
+# `oharness-py` builds outside the workspace, so it has its own
+# sibling `target/` that the root-level `/target` rule doesn't cover.
+crates/oharness-py/target
 Cargo.lock
 *.swp
 .DS_Store

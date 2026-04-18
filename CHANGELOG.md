@@ -11,6 +11,68 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 ## [Unreleased]
 
 ### Added
+- **M3 part 1: `oharness-py` Python bindings scaffold** (plan §14). A
+  new crate at `crates/oharness-py/` ships the adapter pattern that
+  lets Python code plug into Rust-side agent runs. Imported as
+  `import oharness`; built via `maturin develop --release`.
+  - **Workspace isolation**: the crate is intentionally **excluded
+    from workspace membership** (`Cargo.toml` top-level `exclude =
+    ["crates/oharness-py"]`). `maturin develop` needs Python headers
+    which aren't available on every CI runner, so `just ci` skips
+    this crate by design. Path deps from `oharness-py` into the
+    workspace still resolve. Contributors working on the bindings
+    run `just python-check` (opt-in) to lint the Rust side without
+    needing maturin.
+  - **pyo3 0.24 with `abi3-py310` + `extension-module`**: the stable
+    ABI for Python 3.10+ means pyo3 bundles the ABI stubs, so
+    `cargo check` / `cargo clippy` work without `python-devel`
+    headers; the extension-module feature skips linking libpython
+    (the host interpreter resolves symbols at load time).
+  - **Three adapters, one pattern** — each wraps a Python object
+    implementing one method; the wire type between Rust and Python
+    is always a **JSON-encoded string** (not a structured `dict`),
+    so the serde codec on the Rust side stays canonical:
+    - `PyLlm(callable, name=...)` — expects `complete(req_json: str)
+      -> str` returning a `CompletionResponse` JSON. Implements
+      `oharness_llm::Llm::complete`; `stream()` returns
+      `LlmError::Unsupported("stream")` (streaming from Python is
+      v1.2+ per plan §14.2). The sync Python method runs under
+      `tokio::task::spawn_blocking` so blocking IO in Python
+      doesn't stall the async runtime.
+    - `PyCritic(callable, name=...)` — expects `assess(ctx_json:
+      str) -> str` returning a verdict JSON with shapes
+      `{"verdict":"accept"}`, `{"verdict":"accept_with_note","note":"..."}`,
+      `{"verdict":"reject","reason":"..."}`, or
+      `{"verdict":"abort","reason":"..."}`. Implements
+      `oharness_critic::Critic::assess`. **Fail-open**: any Python
+      exception or JSON decode error returns `AcceptWithNote` with
+      the error message, matching plan §11.1. `revise` is
+      intentionally unsupported from Python — the replacement
+      `AssistantTurn` shape is non-trivial, so Python critics emit
+      `reject` and let the loop's retry path regenerate.
+    - `PyTaskEvaluator(callable)` — expects `evaluate(task_json:
+      str, outcome_json: str) -> str` returning a
+      `TaskEvaluationResult` JSON (`{score, passed, details}`).
+      Implements `oharness_core::TaskEvaluator::evaluate`.
+  - **GIL discipline**: `PyObjectExt::clone_ref_unbound_gil()`
+    (implemented via `Python::with_gil`) is used to ship
+    `Arc<PyObject>` handles across `spawn_blocking` boundaries
+    without holding the GIL on the async side.
+  - **`#[pymodule] fn oharness(m: &Bound<'_, PyModule>)`** registers
+    the three classes plus `__version__` (matches crate version).
+    `PyBridgeError` (via `thiserror`) maps internal failures to
+    Python exceptions cleanly.
+  - **Docs**: `crates/oharness-py/README.md` with maturin build
+    steps, a full end-to-end example for each of the three
+    adapters, a priority table per plan §14.2 showing what's live
+    (`Llm::complete`, `Critic::assess`, `TaskEvaluator::evaluate`)
+    and what's deferred (`Reflector`, `UserSimulator`,
+    `MemoryPolicy`, `Llm::stream`, `ToolSet`,
+    `RequestLayer`/`ResponseLayer`, per-chunk observers).
+  - **`just python-check` recipe** — opt-in, NOT part of `just ci`.
+    Runs `cargo check` + `cargo clippy --all-targets -- -D
+    warnings` from `crates/oharness-py/`. Contributors touching the
+    bindings run this; CI stays green without Python.
 - M1a minimum-viable agent (commit `eb4b03c`): 7 workspace crates (`oharness-core`,
   `oharness-llm`, `oharness-providers`, `oharness-tools`, `oharness-memory`,
   `oharness-trace`, `oharness-loop`). `ReactLoop` with Anthropic `complete()`

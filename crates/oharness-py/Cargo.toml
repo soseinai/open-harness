@@ -1,0 +1,33 @@
+[package]
+name = "oharness-py"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/aishfenton/open-harness"
+authors = ["open-harness contributors"]
+description = "Python bindings for open-harness (plan §14)"
+publish = false  # Ships via PyPI (as `oharness`), not crates.io.
+
+[lib]
+name = "oharness"
+# cdylib for the Python extension module; rlib so the crate can still
+# be linked from native Rust tests / tooling if someone needs it.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# abi3-py310 ⇒ target the Python 3.10+ stable ABI; pyo3 bundles the
+# ABI stubs so we don't need python-devel headers to compile.
+# extension-module ⇒ don't link libpython (the extension loader in the
+# running Python process resolves symbols).
+pyo3 = { version = "0.24", features = ["abi3-py310", "extension-module"] }
+
+oharness-core = { path = "../oharness-core" }
+oharness-llm = { path = "../oharness-llm" }
+oharness-critic = { path = "../oharness-critic" }
+
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }

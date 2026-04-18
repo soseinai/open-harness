@@ -50,3 +50,13 @@ schema-check:
 # CHANGELOG-schema.md entry.
 schema-export:
     cargo run -p oharness-core --example export_schema --features schemars-export
+
+# Rust-side lint/check for the `oharness-py` pyo3 crate. Opt-in (NOT
+# part of `just ci`) because, while the `abi3-py310` feature lets
+# `cargo check` / `cargo clippy` run without Python headers, a full
+# `maturin develop` build still needs them. Keep CI runners happy
+# and let contributors working on the bindings run this explicitly.
+# A full build uses `maturin develop --release` from that crate dir.
+python-check:
+    cd crates/oharness-py && cargo check
+    cd crates/oharness-py && cargo clippy --all-targets -- -D warnings
