@@ -14,6 +14,9 @@ workspace = true
 [features]
 default = ["react"]
 react = []
+# M2 part 2: conversational user-simulator loop + reflexion helper.
+conversation = []
+reflexion = []
 
 [dependencies]
 oharness-core = { workspace = true }
@@ -21,6 +24,7 @@ oharness-llm = { workspace = true }
 oharness-tools = { workspace = true }
 oharness-memory = { workspace = true }
 oharness-trace = { workspace = true }
+oharness-critic = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

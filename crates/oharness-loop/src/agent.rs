@@ -6,6 +6,7 @@ use oharness_core::{
     AgentError, ApprovalChannel, BudgetHandle, Cancellation, EventSink, NullApprovalChannel,
     NullBudget, NullSink, RunId, RunOutcome, ScopedEmitter, SharedSink, Task, TrajectoryHandle,
 };
+use oharness_critic::{CompositeCritic, CriticTrigger, ReflectionInjector};
 use oharness_llm::Llm;
 use oharness_memory::{MemoryPolicy, Passthrough};
 use oharness_tools::ToolSet;
@@ -21,6 +22,15 @@ pub struct Agent {
     events: Arc<dyn EventSink>,
     budget: Arc<dyn BudgetHandle>,
     approval: Arc<dyn ApprovalChannel>,
+    critics: Option<Arc<CompositeCritic>>,
+    critic_trigger: CriticTrigger,
+    /// Handle stashed for `run_reflexion` — `None` if the builder wasn't
+    /// given a [`ReflectionInjector`]. The injector itself (if present)
+    /// is also wired into the Llm middleware stack before the agent's
+    /// run begins; this field is just the accessor to let
+    /// [`run_reflexion`](crate::reflexion) swap its reflection list
+    /// between episodes.
+    reflection_injector: Option<Arc<ReflectionInjector>>,
     config: AgentConfig,
 }
 
@@ -39,6 +49,23 @@ impl Agent {
 
     pub fn sink(&self) -> &Arc<dyn EventSink> {
         &self.events
+    }
+
+    /// Returns the agent's [`ReflectionInjector`], or `None` if the
+    /// builder wasn't given one. `run_reflexion` uses this accessor to
+    /// reconfigure injected reflections between episodes; building an
+    /// agent without an injector and then passing it to `run_reflexion`
+    /// is a configuration error caught before any episode runs.
+    pub fn injector(&self) -> Option<&Arc<ReflectionInjector>> {
+        self.reflection_injector.as_ref()
+    }
+
+    pub fn critics(&self) -> Option<&Arc<CompositeCritic>> {
+        self.critics.as_ref()
+    }
+
+    pub fn critic_trigger(&self) -> CriticTrigger {
+        self.critic_trigger
     }
 
     pub async fn run(&self, task: Task) -> Result<RunOutcome, AgentError> {
@@ -66,6 +93,8 @@ impl Agent {
             llm: traced_llm,
             tools: traced_tools,
             memory: self.memory.clone(),
+            critics: self.critics.clone(),
+            critic_trigger: self.critic_trigger,
             events: emitter,
             budget: self.budget.clone(),
             cancellation: Cancellation::new(),
@@ -90,6 +119,9 @@ pub struct AgentBuilder {
     events: Option<SharedSink>,
     budget: Option<Arc<dyn BudgetHandle>>,
     approval: Option<Arc<dyn ApprovalChannel>>,
+    critics: Option<Arc<CompositeCritic>>,
+    critic_trigger: Option<CriticTrigger>,
+    reflection_injector: Option<Arc<ReflectionInjector>>,
     config: AgentConfig,
 }
 
@@ -139,6 +171,31 @@ impl AgentBuilder {
         self
     }
 
+    /// Attach a critic. Typically a [`CompositeCritic`] wrapping one or
+    /// more [`oharness_critic::Critic`] implementations; single-critic
+    /// setups can construct a composite with one child under
+    /// `AggregationPolicy::FirstReject`.
+    pub fn with_critics(mut self, critics: Arc<CompositeCritic>) -> Self {
+        self.critics = Some(critics);
+        self
+    }
+
+    pub fn with_critic_trigger(mut self, trigger: CriticTrigger) -> Self {
+        self.critic_trigger = Some(trigger);
+        self
+    }
+
+    /// Attach a [`ReflectionInjector`] for use with
+    /// [`run_reflexion`](crate::reflexion). The injector is *not* wired
+    /// into the LLM middleware stack automatically — users wire it with
+    /// `LlmExt::with_request_layer(injector.clone())` before passing the
+    /// LLM to `.with_llm(..)`. This stash is so `run_reflexion` can find
+    /// the injector later and swap its reflection list between episodes.
+    pub fn with_reflection_injector(mut self, injector: Arc<ReflectionInjector>) -> Self {
+        self.reflection_injector = Some(injector);
+        self
+    }
+
     pub fn build(self) -> Result<Agent, AgentError> {
         let llm = self
             .llm
@@ -177,6 +234,9 @@ impl AgentBuilder {
             events,
             budget,
             approval,
+            critics: self.critics,
+            critic_trigger: self.critic_trigger.unwrap_or_default(),
+            reflection_injector: self.reflection_injector,
             config: self.config,
         })
     }

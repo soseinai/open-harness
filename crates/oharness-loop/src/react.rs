@@ -8,13 +8,15 @@
 use crate::loop_trait::{Loop, LoopContext};
 use async_trait::async_trait;
 use oharness_core::event::{
-    EventKind, MetaPayload, RunFinishedPayload, RunStartedPayload, TurnFinishedPayload, TurnPayload,
+    EventKind, MetaPayload, RunFinishedPayload, RunStartedPayload, TurnFinishedPayload,
+    TurnPayload, TurnRevisedPayload,
 };
 use oharness_core::{
-    AgentError, BudgetRequest, CompletionRequest, CompletionResponse, Content, ConversationView,
-    Message, MetadataMap, ResourceUsage, RunError, RunErrorCategory, RunOutcome, StopReason, Task,
-    Termination, TrajectoryHandle, TruncationLimit,
+    AgentError, AssistantTurn, BudgetRequest, CompletionRequest, CompletionResponse, Content,
+    ConversationView, Message, MetadataMap, ResourceUsage, RunError, RunErrorCategory, RunOutcome,
+    StopReason, Task, Termination, TrajectoryHandle, TrajectoryView, TruncationLimit,
 };
+use oharness_critic::{AssessmentContext, Critic, CriticTrigger, CriticVerdict};
 use oharness_memory::policy::MemoryContext;
 use oharness_tools::context::ToolContext;
 use oharness_tools::toolset::ToolOutcome;
@@ -193,23 +195,80 @@ impl Loop for ReactLoop {
                 .await;
 
             // ---- append assistant message ----
-            let assistant_msg = Message::Assistant {
+            let mut assistant_msg = Message::Assistant {
                 content: response.content.clone(),
                 stop_reason: Some(response.stop_reason.clone()),
                 meta: MetadataMap::new(),
             };
+            let mut effective_stop = response.stop_reason.clone();
+            let mut effective_usage = response.usage.clone();
             messages.push(assistant_msg.clone());
 
+            // ---- critic invocation (plan §11) ----
+            // Only AfterAssistant is wired for M2 part 2; other triggers
+            // (AfterToolResult, AfterEveryNTurns, OnDemand) are deferred.
+            if matches!(ctx.critic_trigger, CriticTrigger::AfterAssistant) {
+                if let Some(critic) = &ctx.critics {
+                    match run_critic_after_assistant(
+                        critic.as_ref(),
+                        &task,
+                        &messages,
+                        turn_index,
+                        &assistant_msg,
+                        &effective_usage,
+                        &effective_stop,
+                        &turn_span,
+                        turn_open_seq,
+                        ctx,
+                    )
+                    .await
+                    {
+                        CriticOutcome::Continue {
+                            effective_message,
+                            effective_usage: new_usage,
+                            effective_stop: new_stop,
+                        } => {
+                            // Swap the in-history assistant message with the
+                            // (possibly revised) final version.
+                            if let Some(last) = messages.last_mut() {
+                                *last = effective_message.clone();
+                            }
+                            assistant_msg = effective_message;
+                            effective_usage = new_usage;
+                            effective_stop = new_stop;
+                        }
+                        CriticOutcome::Terminate { error } => {
+                            termination = Some(Termination::Failed {
+                                error,
+                                at_turn: turn_index,
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = assistant_msg; // silence unused-assignment warning when no revision
+
             // ---- tool execution if any ----
-            let tool_calls_in_turn = execute_tool_calls(&response, ctx, &mut messages).await;
+            // Use the *effective* response — a revise verdict may have
+            // swapped the tool_use blocks the agent actually intended.
+            let effective_response = CompletionResponse {
+                id: response.id.clone(),
+                model: response.model.clone(),
+                content: extract_content_from_message(messages.last()),
+                stop_reason: effective_stop.clone(),
+                usage: effective_usage.clone(),
+            };
+            let tool_calls_in_turn =
+                execute_tool_calls(&effective_response, ctx, &mut messages).await;
 
             // ---- turn.finished ----
             ctx.events.emit(
                 &turn_span,
                 EventKind::TurnFinished(TurnFinishedPayload {
                     turn_index,
-                    stop_reason: response.stop_reason.clone(),
-                    usage: response.usage.clone(),
+                    stop_reason: effective_stop.clone(),
+                    usage: effective_usage.clone(),
                     tool_calls: tool_calls_in_turn,
                 }),
                 Some(turn_open_seq),
@@ -219,7 +278,7 @@ impl Loop for ReactLoop {
             usage_totals.tool_calls += tool_calls_in_turn;
 
             // ---- termination decision ----
-            match response.stop_reason {
+            match effective_stop {
                 StopReason::EndTurn => {
                     termination = Some(Termination::Completed {
                         reason: oharness_core::CompletionReason::EndTurn,
@@ -290,6 +349,211 @@ impl Loop for ReactLoop {
             finished_at,
             agent_state: MetadataMap::new(),
         })
+    }
+}
+
+/// Result of a single critic cycle for one assistant turn. Produced by
+/// [`run_critic_after_assistant`], consumed by the loop body.
+///
+/// `Continue` always carries the effective assistant state — the same
+/// values that went in if the critic accepted first-pass, or the final
+/// revision if the critic revised-then-accepted. This lets the loop
+/// consume one canonical `(message, usage, stop)` triple regardless of
+/// whether a revision happened.
+enum CriticOutcome {
+    Continue {
+        effective_message: Message,
+        effective_usage: oharness_core::Usage,
+        effective_stop: StopReason,
+    },
+    Terminate {
+        error: RunError,
+    },
+}
+
+/// Invoke the critic on the freshly-appended assistant turn and resolve
+/// the verdict. Re-invokes the critic on each revision up to
+/// [`LoopContext::revision_depth_cap`] — once exceeded, the most recent
+/// `Revise` verdict is converted to `Reject` per plan §11.1.
+#[allow(clippy::too_many_arguments)]
+async fn run_critic_after_assistant(
+    critic: &oharness_critic::CompositeCritic,
+    task: &Task,
+    messages: &[Message],
+    turn_index: u32,
+    initial_message: &Message,
+    initial_usage: &oharness_core::Usage,
+    initial_stop: &StopReason,
+    turn_span: &str,
+    turn_open_seq: u64,
+    ctx: &LoopContext,
+) -> CriticOutcome {
+    let mut current_message = initial_message.clone();
+    let mut current_usage = initial_usage.clone();
+    let mut current_stop = initial_stop.clone();
+
+    for depth in 0..=ctx.revision_depth_cap {
+        let original_seq = turn_open_seq;
+        let trajectory_tail: Vec<oharness_core::Event> = Vec::new(); // loop does not re-read events
+        let turn = AssistantTurn::new(
+            turn_index,
+            turn_span,
+            current_message.clone(),
+            current_usage.clone(),
+            current_stop.clone(),
+        );
+        let assess_ctx = AssessmentContext::new(
+            task,
+            ConversationView::new(messages),
+            &turn,
+            TrajectoryView::new(&trajectory_tail),
+        );
+
+        let verdict = critic.assess(&assess_ctx).await;
+        match verdict {
+            CriticVerdict::Accept => {
+                ctx.events.emit(
+                    turn_span,
+                    EventKind::CriticAssessed(json!({
+                        "critic": critic.name(),
+                        "verdict": "accept",
+                        "revision_depth": depth,
+                    })),
+                    Some(turn_open_seq),
+                );
+                return CriticOutcome::Continue {
+                    effective_message: current_message,
+                    effective_usage: current_usage,
+                    effective_stop: current_stop,
+                };
+            }
+            CriticVerdict::AcceptWithNote(note) => {
+                ctx.events.emit(
+                    turn_span,
+                    EventKind::CriticAssessed(json!({
+                        "critic": critic.name(),
+                        "verdict": "accept_with_note",
+                        "note": note,
+                        "revision_depth": depth,
+                    })),
+                    Some(turn_open_seq),
+                );
+                return CriticOutcome::Continue {
+                    effective_message: current_message,
+                    effective_usage: current_usage,
+                    effective_stop: current_stop,
+                };
+            }
+            CriticVerdict::Reject { reason } => {
+                ctx.events.emit(
+                    turn_span,
+                    EventKind::CriticRejected(json!({
+                        "critic": critic.name(),
+                        "reason": reason,
+                        "revision_depth": depth,
+                    })),
+                    Some(turn_open_seq),
+                );
+                return CriticOutcome::Terminate {
+                    error: RunError {
+                        category: RunErrorCategory::Critic,
+                        message: format!("critic `{}` rejected turn: {reason}", critic.name()),
+                    },
+                };
+            }
+            CriticVerdict::Abort { reason } => {
+                ctx.events.emit(
+                    turn_span,
+                    EventKind::CriticRejected(json!({
+                        "critic": critic.name(),
+                        "reason": reason,
+                        "abort": true,
+                        "revision_depth": depth,
+                    })),
+                    Some(turn_open_seq),
+                );
+                return CriticOutcome::Terminate {
+                    error: RunError {
+                        category: RunErrorCategory::Critic,
+                        message: format!("critic `{}` aborted run: {reason}", critic.name()),
+                    },
+                };
+            }
+            CriticVerdict::Revise {
+                replacement,
+                reason,
+            } => {
+                if depth >= ctx.revision_depth_cap {
+                    // Cap exceeded — convert to Reject per plan §11.1.
+                    ctx.events.emit(
+                        turn_span,
+                        EventKind::CriticRejected(json!({
+                            "critic": critic.name(),
+                            "reason": format!(
+                                "revision depth cap ({}) exceeded: {reason}",
+                                ctx.revision_depth_cap
+                            ),
+                            "revision_depth": depth,
+                        })),
+                        Some(turn_open_seq),
+                    );
+                    return CriticOutcome::Terminate {
+                        error: RunError {
+                            category: RunErrorCategory::Critic,
+                            message: format!(
+                                "critic `{}`: revision depth cap ({}) exceeded",
+                                critic.name(),
+                                ctx.revision_depth_cap
+                            ),
+                        },
+                    };
+                }
+                // Emit critic.revised (critic's declaration) + turn.revised
+                // (loop's view of the swap), per plan §11.1.
+                let critic_revised_seq = ctx.events.emit(
+                    turn_span,
+                    EventKind::CriticRevised(json!({
+                        "critic": critic.name(),
+                        "reason": reason,
+                        "revision_depth": depth,
+                    })),
+                    Some(turn_open_seq),
+                );
+                ctx.events.emit(
+                    turn_span,
+                    EventKind::TurnRevised(TurnRevisedPayload {
+                        original_seq,
+                        replacement_seq: critic_revised_seq,
+                        reason,
+                    }),
+                    Some(turn_open_seq),
+                );
+                current_message = replacement.message;
+                current_usage = replacement.usage;
+                current_stop = replacement.stop_reason;
+                // Loop again — the revised turn is itself assessed.
+                continue;
+            }
+        }
+    }
+
+    // Unreachable: loop returns in every branch except Revise, and Revise
+    // checks `depth >= cap` to bail out. Defensive fallback:
+    CriticOutcome::Continue {
+        effective_message: current_message,
+        effective_usage: current_usage,
+        effective_stop: current_stop,
+    }
+}
+
+/// Pull the `Content` vec out of an `Assistant` message. Used to build
+/// the post-revision `CompletionResponse` fed into
+/// `execute_tool_calls` — the critic may have changed which tool-use
+/// blocks the agent issues.
+fn extract_content_from_message(msg: Option<&Message>) -> Vec<Content> {
+    match msg {
+        Some(Message::Assistant { content, .. }) => content.clone(),
+        _ => Vec::new(),
     }
 }
 

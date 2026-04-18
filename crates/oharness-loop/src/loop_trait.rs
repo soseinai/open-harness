@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use oharness_core::{
     AgentError, ApprovalChannel, BudgetHandle, Cancellation, RunOutcome, ScopedEmitter, Task,
 };
+use oharness_critic::{CompositeCritic, CriticTrigger};
 use oharness_llm::Llm;
 use oharness_memory::MemoryPolicy;
 use oharness_tools::ToolSet;
@@ -18,6 +19,11 @@ pub struct LoopContext {
     pub llm: Arc<dyn Llm>,
     pub tools: Arc<dyn ToolSet>,
     pub memory: Arc<dyn MemoryPolicy>,
+    /// Optional critic (usually a [`CompositeCritic`] for multi-critic
+    /// setups). `None` disables all critic invocations regardless of
+    /// trigger setting.
+    pub critics: Option<Arc<CompositeCritic>>,
+    pub critic_trigger: CriticTrigger,
     pub events: ScopedEmitter,
     pub budget: Arc<dyn BudgetHandle>,
     pub cancellation: Cancellation,

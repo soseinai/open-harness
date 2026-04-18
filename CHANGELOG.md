@@ -32,6 +32,72 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
   `Content::thinking(..)` keep the ergonomic call sites short. 7 new
   round-trip unit tests cover every `Content` variant plus full
   `Event::LlmRequest` / `Event::LlmResponse` envelopes.
+- **M2 part 2 — loop integration** (plan §12). Wires the critic +
+  reflector trait surface from M2 part 1 into the ReactLoop and ships
+  a `ConversationLoop` + `run_reflexion` helper. Loop integration is the
+  second of three M2 parts; part 3 (`oharness-eval` + SWE-bench-lite) is
+  still outstanding and gates M2 overall.
+  - `LoopContext` grows `critics: Option<Arc<CompositeCritic>>` and
+    `critic_trigger: CriticTrigger`. `ReactLoop` invokes the critic
+    after each assistant turn (only `AfterAssistant` is wired;
+    `AfterToolResult` / `AfterEveryNTurns` / `OnDemand` deferred) and
+    dispatches on `CriticVerdict`:
+    - `Accept` / `AcceptWithNote` emit `critic.assessed` and continue.
+    - `Reject` emits `critic.rejected` and terminates with
+      `Termination::Failed { category: Critic }`.
+    - `Revise` emits `critic.revised` + `turn.revised` (linking the
+      replacement to the original via `TurnRevisedPayload`), swaps
+      the in-history assistant message for the replacement, and
+      re-invokes the critic up to `revision_depth_cap` before
+      converting to `Reject` per plan §11.1.
+    - `Abort` emits `critic.rejected { abort: true }` and terminates.
+  - `RunErrorCategory` gains `Critic`.
+  - `Agent` + `AgentBuilder` grow `critics`, `critic_trigger`, and
+    `reflection_injector` fields, plus `agent.injector()` /
+    `agent.critics()` / `agent.critic_trigger()` accessors per plan
+    §12.5. `AgentBuilder::with_critics(..)`,
+    `.with_critic_trigger(..)`, and `.with_reflection_injector(..)`
+    land with sensible defaults (no critics, `AfterAssistant` trigger,
+    no injector).
+  - New `UserSimulator` trait + `UserAction` (`Say` /
+    `EndConversation`) + `UserError` (plan §12.3). Shipped impls:
+    - `ScriptedUserSimulator::new(script)` — replays a fixed sequence.
+      First entry is the initial user message; subsequent responses
+      walk the remaining entries; exhausted script returns
+      `EndConversation`.
+    - `LlmUserSimulator::new(llm, persona, prompt_template)` — drives
+      a user LLM with `{persona}` / `{task}` substitutions; parses a
+      configurable end sentinel (default `<end>`, case-insensitive)
+      to decide `EndConversation`.
+  - New `ConversationLoop<U: UserSimulator>` (feature `conversation`).
+    Alternates agent assistant turns with simulator responses.
+    Simulator errors surface as `Termination::Failed { category:
+    UserSimulator }` — **never** as `EndConversation` per plan §12.3.
+    Emits `user.simulated.message` on each simulator utterance and
+    `user.simulated.ended` once on the terminating turn.
+  - New `run_reflexion(agent, task, evaluator, reflector,
+    max_episodes)` helper (feature `reflexion`). Returns
+    `Result<Vec<OwnedEpisode>, AgentError>`. Short-circuits with
+    `AgentError::Configuration` before any episode runs if the agent
+    wasn't built with `.with_reflection_injector(..)` per plan §12.6.
+    Threads reflections via `ReflectionInjector::set_reflections(..)`
+    between episodes, emits `reflection.generated` after each reflection
+    that materialized, stops on `evaluation.passed`. A local
+    `ReflexionEvaluator` trait stands in for the future
+    `oharness-eval::TaskEvaluator` — when the eval crate lands it will
+    re-export the same shape.
+  - 13 new tests: 2 critic integration end-to-end (accepting critic
+    completes the run + emits `critic.assessed`; rejecting critic
+    fails with `RunErrorCategory::Critic` + emits `critic.rejected`),
+    1 conversation-loop end-to-end (scripted simulator drives 2-turn
+    conversation, `user.simulated.{message,ended}` events present),
+    5 `UserSimulator` unit tests (scripted order, empty-script error,
+    LLM user initial message, LLM user say + end-sentinel paths,
+    LLM error propagates through `UserError::Llm`), and 3
+    `run_reflexion` unit tests (missing injector → `Configuration`
+    error, evaluator passes → stops after 1 episode, evaluator fails
+    → all `max_episodes` run). 187 tests total on `--all-features`
+    (was 174).
 - **M2 — `oharness-critic` crate** (plan §11). First slice of the
   research-grade milestone: the critic / reflector trait surface plus
   shipped implementations, with no loop integration yet. The loop-side

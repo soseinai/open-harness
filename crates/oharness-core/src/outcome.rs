@@ -85,6 +85,7 @@ pub enum RunErrorCategory {
     Tool,
     Memory,
     Budget,
+    Critic,
     UserSimulator,
     Other,
 }
