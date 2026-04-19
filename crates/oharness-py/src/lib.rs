@@ -77,6 +77,17 @@ use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use serde::Serialize;
 
+// Orchestration bindings — `Agent`, `AgentBuilder`, `Task`,
+// shipped `ReactLoop` / `FsToolSet` / `InMemorySink` /
+// `CompositeCritic`. Lives in its own module to keep lib.rs
+// focused on the user-written adapter surface.
+mod orchestration;
+use orchestration::{
+    py_run_reflexion, PyAgent, PyAgentBuilder, PyBudgetMiddleware, PyCompositeCritic,
+    PyConversationLoop, PyFileSink, PyFsToolSet, PyInMemorySink, PyLayeredLlm, PyLlmJudgeCritic,
+    PyReactLoop, PyReflectionInjector, PyReplayLlm, PyScriptedUserSimulator, PyTask, PyTokenBudget,
+};
+
 // ======================================================================
 // PyLlm — wraps a Python `Llm`-like object.
 // ======================================================================
@@ -88,9 +99,9 @@ use serde::Serialize;
 /// a later milestone.
 #[pyclass]
 pub struct PyLlm {
-    py_obj: PyObject,
-    name: String,
-    capabilities: LlmCapabilities,
+    pub(crate) py_obj: PyObject,
+    pub(crate) name: String,
+    pub(crate) capabilities: LlmCapabilities,
 }
 
 #[pymethods]
@@ -160,8 +171,8 @@ impl Llm for PyLlm {
 /// spellings are documented below.
 #[pyclass]
 pub struct PyCritic {
-    py_obj: PyObject,
-    name: String,
+    pub(crate) py_obj: PyObject,
+    pub(crate) name: String,
 }
 
 #[pymethods]
@@ -288,7 +299,7 @@ struct AssessmentView {
 /// factory errors.
 #[pyclass]
 pub struct PyTaskEvaluator {
-    py_obj: PyObject,
+    pub(crate) py_obj: PyObject,
 }
 
 #[pymethods]
@@ -310,7 +321,13 @@ impl TaskEvaluator for PyTaskEvaluator {
             Ok(s) => s,
             Err(e) => return eval_error(&format!("encode task: {e}")),
         };
-        let outcome_json = match serde_json::to_string(outcome) {
+        // Serialize via OutcomeWire so we skip the in-memory
+        // TrajectoryHandle (which refuses Serialize on in-memory
+        // variants). Without this, every evaluator that sees an
+        // agent-produced outcome gets an "encode outcome" error
+        // and can't inspect the final messages.
+        let outcome_wire = OutcomeWire::from(outcome);
+        let outcome_json = match serde_json::to_string(&outcome_wire) {
             Ok(s) => s,
             Err(e) => return eval_error(&format!("encode outcome: {e}")),
         };
@@ -375,8 +392,8 @@ fn eval_error(msg: &str) -> EvaluationResult {
 /// reflexion sweep.
 #[pyclass]
 pub struct PyReflector {
-    py_obj: PyObject,
-    name: String,
+    pub(crate) py_obj: PyObject,
+    pub(crate) name: String,
 }
 
 #[pymethods]
@@ -399,22 +416,22 @@ impl PyReflector {
 /// blow up the call), and reflectors written in Python don't have a
 /// good way to consume a file path anyway.
 #[derive(Serialize)]
-struct EpisodeWire<'a> {
-    index: u32,
-    task: &'a Task,
-    outcome: OutcomeWire<'a>,
-    evaluation: &'a EvaluationResult,
-    prior_reflections: &'a [Reflection],
+pub(crate) struct EpisodeWire<'a> {
+    pub(crate) index: u32,
+    pub(crate) task: &'a Task,
+    pub(crate) outcome: OutcomeWire<'a>,
+    pub(crate) evaluation: &'a EvaluationResult,
+    pub(crate) prior_reflections: &'a [Reflection],
 }
 
 #[derive(Serialize)]
-struct OutcomeWire<'a> {
-    run_id: oharness_core::RunId,
+pub(crate) struct OutcomeWire<'a> {
+    pub(crate) run_id: oharness_core::RunId,
     #[serde(skip_serializing_if = "Option::is_none")]
-    task_id: Option<&'a String>,
-    termination: &'a oharness_core::Termination,
-    final_messages: &'a [Message],
-    usage: &'a oharness_core::ResourceUsage,
+    pub(crate) task_id: Option<&'a String>,
+    pub(crate) termination: &'a oharness_core::Termination,
+    pub(crate) final_messages: &'a [Message],
+    pub(crate) usage: &'a oharness_core::ResourceUsage,
 }
 
 impl<'a> From<&'a RunOutcome> for OutcomeWire<'a> {
@@ -542,8 +559,8 @@ impl Reflector for PyReflector {
 /// bugs behind `EndConversation` would break eval reproducibility.
 #[pyclass]
 pub struct PyUserSimulator {
-    py_obj: PyObject,
-    name: String,
+    pub(crate) py_obj: PyObject,
+    pub(crate) name: String,
 }
 
 #[pymethods]
@@ -656,8 +673,8 @@ impl UserSimulator for PyUserSimulator {
 /// silently pass the raw conversation through.
 #[pyclass]
 pub struct PyMemoryPolicy {
-    py_obj: PyObject,
-    name: String,
+    pub(crate) py_obj: PyObject,
+    pub(crate) name: String,
 }
 
 #[pymethods]
@@ -778,9 +795,9 @@ impl MemoryPolicy for PyMemoryPolicy {
 /// (via `tool.call.failed`) without crashing the run.
 #[pyclass]
 pub struct PyToolSet {
-    py_obj: PyObject,
-    specs: Vec<ToolSpec>,
-    name: String,
+    pub(crate) py_obj: PyObject,
+    pub(crate) specs: Vec<ToolSpec>,
+    pub(crate) name: String,
 }
 
 #[pymethods]
@@ -990,8 +1007,8 @@ impl ToolSet for PyToolSet {
 /// the underlying LLM.
 #[pyclass]
 pub struct PyRequestLayer {
-    py_obj: PyObject,
-    name: String,
+    pub(crate) py_obj: PyObject,
+    pub(crate) name: String,
 }
 
 #[pymethods]
@@ -1084,9 +1101,9 @@ impl RequestLayer for PyRequestLayer {
 /// via `eprintln!` and leaves the response unchanged.
 #[pyclass]
 pub struct PyResponseLayer {
-    py_obj: PyObject,
-    name: String,
-    stream_mode: ResponseLayerStreamMode,
+    pub(crate) py_obj: PyObject,
+    pub(crate) name: String,
+    pub(crate) stream_mode: ResponseLayerStreamMode,
 }
 
 #[pymethods]
@@ -1227,6 +1244,7 @@ impl PyObjectExt for PyObject {
 
 #[pymodule]
 fn oharness(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Adapter classes (user-written Python → Rust trait bridges).
     m.add_class::<PyLlm>()?;
     m.add_class::<PyCritic>()?;
     m.add_class::<PyTaskEvaluator>()?;
@@ -1236,6 +1254,28 @@ fn oharness(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyToolSet>()?;
     m.add_class::<PyRequestLayer>()?;
     m.add_class::<PyResponseLayer>()?;
+
+    // Orchestration classes (Python drivers around shipped Rust types).
+    m.add_class::<PyTask>()?;
+    m.add_class::<PyReactLoop>()?;
+    m.add_class::<PyFsToolSet>()?;
+    m.add_class::<PyInMemorySink>()?;
+    m.add_class::<PyFileSink>()?;
+    m.add_class::<PyReplayLlm>()?;
+    m.add_class::<PyTokenBudget>()?;
+    m.add_class::<PyBudgetMiddleware>()?;
+    m.add_class::<PyCompositeCritic>()?;
+    m.add_class::<PyLayeredLlm>()?;
+    m.add_class::<PyLlmJudgeCritic>()?;
+    m.add_class::<PyReflectionInjector>()?;
+    m.add_class::<PyScriptedUserSimulator>()?;
+    m.add_class::<PyConversationLoop>()?;
+    m.add_class::<PyAgentBuilder>()?;
+    m.add_class::<PyAgent>()?;
+
+    // Module-level functions.
+    m.add_function(wrap_pyfunction!(py_run_reflexion, m)?)?;
+
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

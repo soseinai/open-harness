@@ -18,6 +18,22 @@ pub trait Critic: Send + Sync {
     async fn assess(&self, ctx: &AssessmentContext<'_>) -> CriticVerdict;
 }
 
+/// Forward-through impl so `Arc<dyn Critic>` (and `Arc<T>` for any
+/// concrete `T: Critic`) satisfies the `Critic` bound. This is the
+/// standard shared-handle idiom — callers holding an `Arc<MyCritic>`
+/// can drop it straight into `CompositeCritic.push(Box::new(arc))`
+/// without an adapter shim. Symmetric with the `Arc<T>: Llm` /
+/// `Arc<T>: RequestLayer` / `Arc<T>: ResponseLayer` impls elsewhere.
+#[async_trait]
+impl<T: Critic + ?Sized> Critic for std::sync::Arc<T> {
+    fn name(&self) -> &str {
+        (**self).name()
+    }
+    async fn assess(&self, ctx: &AssessmentContext<'_>) -> CriticVerdict {
+        (**self).assess(ctx).await
+    }
+}
+
 /// The slice of state a critic gets to see. Borrowed — nothing to keep
 /// after `assess` returns.
 pub struct AssessmentContext<'a> {

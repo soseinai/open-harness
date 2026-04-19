@@ -78,3 +78,29 @@ schema-export:
 python-check:
     cd crates/oharness-py && cargo check
     cd crates/oharness-py && cargo clippy --all-targets -- -D warnings
+
+# Build the `oharness` wheel with maturin and smoke-run every
+# Python example. Opt-in — assumes `maturin` is installed and a
+# `.venv` sits at `crates/oharness-py/.venv/`. If missing,
+# bootstrap with:
+#
+#     cd crates/oharness-py
+#     uv venv .venv --python 3.13
+#     .venv/bin/python -m ensurepip --upgrade
+#     .venv/bin/python -m pip install maturin
+#
+# Then `just python-examples` builds + runs the 10 runnable
+# examples. `self_refine.py` is a deferred stub (the Revise
+# verdict isn't exposed from Python); it's built but not run.
+python-examples:
+    cd crates/oharness-py && .venv/bin/python -m maturin develop --release
+    cd crates/oharness-py && .venv/bin/python examples/hello_scripted.py
+    cd crates/oharness-py && .venv/bin/python examples/react_with_tools.py
+    cd crates/oharness-py && .venv/bin/python examples/custom_critic.py
+    cd crates/oharness-py && .venv/bin/python examples/budget_enforcement.py
+    cd crates/oharness-py && .venv/bin/python examples/replay_trajectory.py
+    cd crates/oharness-py && .venv/bin/python examples/custom_memory_policy.py
+    cd crates/oharness-py && .venv/bin/python examples/llm_judge_critic.py
+    cd crates/oharness-py && .venv/bin/python examples/custom_middleware.py
+    cd crates/oharness-py && .venv/bin/python examples/reflexion_run.py
+    cd crates/oharness-py && .venv/bin/python examples/multi_agent_conversation.py

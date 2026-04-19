@@ -10,6 +10,84 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 
 ## [Unreleased]
 
+### Added
+- **M3 part 5: `oharness-py` orchestration surface + 10 Python
+  examples.** Closes the plan §14 v1 gate — Python users can now
+  drive the full `Agent` loop end-to-end, not just write
+  extension points that Rust code consumes. The adapter side
+  (M3 parts 1–4) ships nine user-written trait bridges; this
+  part ships the orchestration side.
+  - **New pyclasses** (no `Py*` prefix in Python — they're
+    first-class bindings, not adapter bridges): `Agent`,
+    `AgentBuilder`, `Task`, `ReactLoop`, `ConversationLoop`,
+    `FsToolSet`, `InMemorySink`, `FileSink`, `ReplayLlm`,
+    `TokenBudget`, `BudgetMiddleware`, `LayeredLlm`,
+    `LlmJudgeCritic`, `ReflectionInjector`, `CompositeCritic`,
+    `ScriptedUserSimulator`. Plus one module-level function:
+    `run_reflexion`.
+  - **`AgentBuilder` surface**: `.with_llm(..)`,
+    `.with_tools(..)`, `.with_loop(..)`, `.with_memory(..)`,
+    `.with_critics(..)`, `.with_event_sink(..)`,
+    `.with_reflection_injector(..)`, `.with_max_turns(..)`.
+    Accepts any of the shipped wrapper types polymorphically —
+    e.g., `with_llm` takes `PyLlm` / `ReplayLlm` /
+    `LayeredLlm` / `BudgetMiddleware`; `with_loop` takes
+    `ReactLoop` or `ConversationLoop`; `with_event_sink` takes
+    `InMemorySink` or `FileSink`.
+  - **Sync `.run()` with GIL-release**: `PyAgent.run(task)`
+    blocks from Python's perspective but internally uses
+    `py.allow_threads(..)` to release the GIL for the duration,
+    letting Python-defined adapters re-acquire it via
+    `Python::with_gil` in their `spawn_blocking` tasks. A
+    shared tokio runtime (via `OnceLock`) amortises the
+    runtime-construction cost across calls.
+  - **Wire shape**: every `.run()` / `run_reflexion` / trimmed
+    outcome return goes through `OutcomeWire` / `EpisodeWire`
+    to dodge `TrajectoryHandle::Serialize`'s in-memory error.
+    Consumers who want the raw trajectory attach a `FileSink`
+    and read the JSONL file directly.
+  - **10 runnable examples** in `crates/oharness-py/examples/`,
+    mirroring 10 of the 11 Rust examples: `hello_scripted.py`,
+    `react_with_tools.py`, `custom_critic.py`,
+    `budget_enforcement.py`, `custom_middleware.py`,
+    `custom_memory_policy.py`, `replay_trajectory.py`,
+    `llm_judge_critic.py`, `reflexion_run.py`,
+    `multi_agent_conversation.py`. Plus `self_refine.py` as a
+    deferred stub — `CriticVerdict::Revise` requires a full
+    `AssistantTurn` round-trip across the GIL that's out of
+    scope for v1 (documented in the stub and the README).
+  - **`just python-examples` recipe** — builds the wheel via
+    `maturin develop --release` in a local `.venv` and runs
+    every example. Opt-in (NOT in `just ci`), same as
+    `just python-check`.
+  - **Library fixes** surfaced while wiring the orchestration
+    surface:
+    - `impl<T: Llm + ?Sized> Llm for Arc<T>` added to
+      `oharness-llm/src/llm.rs`. Symmetric with the
+      `Arc<T>: RequestLayer` / `Arc<T>: ResponseLayer` impls
+      from M4 examples batch 1. Without this, generic
+      middleware like `BudgetMiddleware<Arc<dyn Llm>>`
+      wouldn't compile.
+    - `impl<T: Critic + ?Sized> Critic for Arc<T>` added to
+      `oharness-critic/src/critic.rs`. Lets shipped critics
+      that live behind an `Arc` (e.g., `LlmJudgeCritic`) drop
+      straight into `CompositeCritic.push(Box::new(arc))`
+      without an adapter shim.
+    - `PyTaskEvaluator::evaluate` (M3 part 1) was serialising
+      the raw `RunOutcome` — broken on in-memory trajectories
+      since the start, but the Python-side `FinishedEvaluator`
+      in `reflexion_run.py` is the first caller to exercise
+      the path. Now uses `OutcomeWire` like `PyReflector`
+      already does.
+  - **Cargo.toml** gains `oharness-trace` + `oharness-budget`
+    as deps, and activates `oharness-loop`'s `reflexion` +
+    `conversation` features + `oharness-critic`'s `llm-judge`
+    feature so the orchestration surface has everything it
+    needs.
+  - **README rewrite** — full orchestration section with a
+    10-line "Hello agent" snippet + a table of the 10 shipped
+    examples. `.gitignore` gains `crates/oharness-py/.venv/`.
+
 ### Changed
 - **Plan §18.3 revised — examples-in-CI target: 15 → 11.** The
   original 15-example list was aspirational; M4 batches 1 + 2

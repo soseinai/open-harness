@@ -24,13 +24,16 @@ pyo3 = { version = "0.24", features = ["abi3-py310", "extension-module"] }
 
 oharness-core = { path = "../oharness-core" }
 oharness-llm = { path = "../oharness-llm" }
-oharness-critic = { path = "../oharness-critic" }
+oharness-critic = { path = "../oharness-critic", features = ["llm-judge"] }
 oharness-memory = { path = "../oharness-memory" }
 oharness-tools = { path = "../oharness-tools" }
-# `oharness-loop` brings in `UserSimulator` / `UserAction` / `UserError`.
-# Default features are fine — we don't link any loop runners here, just
-# the trait definitions.
-oharness-loop = { path = "../oharness-loop" }
+oharness-trace = { path = "../oharness-trace" }
+oharness-budget = { path = "../oharness-budget" }
+# `oharness-loop` brings in `UserSimulator` / `UserAction` / `UserError`,
+# `Agent`, `AgentBuilder`, `ReactLoop`, `ConversationLoop`, and
+# `run_reflexion`. We opt in to every feature because the Python
+# surface exposes the full set.
+oharness-loop = { path = "../oharness-loop", features = ["reflexion", "conversation"] }
 
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }

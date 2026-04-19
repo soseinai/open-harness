@@ -1,15 +1,27 @@
 # `oharness` — Python bindings for open-harness
 
-Plan §14. Lets Python code plug `Llm` / `Critic` / `TaskEvaluator`
-implementations into Rust-side agent runs.
+Plan §14. End-to-end Python-driven agent runs — Python users
+write adapters (Llm, Critic, MemoryPolicy, …) and/or drive the
+full `Agent` loop from Python. Sync API; `async def` adapters
+land in a later milestone.
 
-> **Status: v1 — nine adapters live.** `Llm`, `Critic`,
-> `TaskEvaluator`, `Reflector`, `UserSimulator`, `MemoryPolicy`,
-> `ToolSet`, `RequestLayer`, and `ResponseLayer` all ship with
-> their Python shim. End-to-end Python-driven agent runs,
-> `async def` Python methods, and the final streaming-side traits
-> (`Llm::stream`, `ChunkObserver` / `ChunkTransformer`) are
-> deferred per plan §14.2.
+> **Status: v1 — full orchestration surface live.** Nine
+> adapter classes (`PyLlm`, `PyCritic`, `PyTaskEvaluator`,
+> `PyReflector`, `PyUserSimulator`, `PyMemoryPolicy`, `PyToolSet`,
+> `PyRequestLayer`, `PyResponseLayer`) plus twelve orchestration
+> classes (`Agent`, `AgentBuilder`, `Task`, `ReactLoop`,
+> `ConversationLoop`, `FsToolSet`, `InMemorySink`, `FileSink`,
+> `ReplayLlm`, `TokenBudget`, `BudgetMiddleware`,
+> `LayeredLlm`, `LlmJudgeCritic`, `ReflectionInjector`,
+> `CompositeCritic`, `ScriptedUserSimulator`) plus one
+> module-level function (`run_reflexion`).
+>
+> Deferred per plan §14.2: `Llm::stream` (async streaming
+> across the GIL), `ChunkObserver` / `ChunkTransformer`
+> (per-chunk GIL cost), `CriticVerdict::Revise` from Python
+> (full `AssistantTurn` round-trip needs more design), and
+> `FullLayer` from Python (`BoxFuture` wrapping doesn't
+> round-trip cleanly).
 
 ## Build
 
@@ -376,6 +388,94 @@ Notes:
   cheap.
 - Same fail-open semantics — a broken layer leaves the response
   unchanged.
+
+## Orchestration surface
+
+The adapter pattern above lets you **write** extension points in
+Python. To **drive** a full agent from Python, use the
+orchestration classes — Rust types wrapped as first-class Python
+bindings (no `Py*` prefix; they're ergonomic Python classes, not
+adapter bridges):
+
+- **`Agent` / `AgentBuilder`** — `oharness.Agent.builder()...build()`
+  fluent construction, `.run(task)` returns a JSON-serialised
+  `RunOutcome`.
+- **`Task`** — minimum-shape task with an instruction string.
+- **Loops**: `ReactLoop`, `ConversationLoop`.
+- **Sinks**: `InMemorySink` (for tests / inspection),
+  `FileSink` (JSONL trajectory writer; call `.flush()` before
+  exit).
+- **Tools**: `FsToolSet` (shipped). Your own `PyToolSet` (the
+  adapter) also works everywhere `FsToolSet` does.
+- **Critics**: `CompositeCritic(name, policy)` wraps one or more
+  critics with an aggregation policy
+  (`"first_reject"` / `"all_must_accept"` / `"majority_vote"`).
+  `LlmJudgeCritic(judge, rubric, threshold)` is the shipped
+  SCORE-based judge.
+- **Middleware**: `LayeredLlm(inner, request_layers=[...],
+  response_layers=[...])` composes arbitrary Python-defined
+  layers around any Llm.
+- **Budgets**: `TokenBudget.input_plus_output(cap)` +
+  `BudgetMiddleware(inner, budget)`.
+- **Replay**: `ReplayLlm.from_path("run.jsonl")` reads a
+  recorded trajectory and re-drives an agent without the
+  original provider.
+- **Reflexion**: `ReflectionInjector()` + the module-level
+  `oharness.run_reflexion(agent, task, evaluator, reflector,
+  max_episodes=N)` function. The agent must have been built
+  with `.with_reflection_injector(injector)` for `run_reflexion`
+  to find the handle.
+- **Conversation**: `ScriptedUserSimulator([msg, msg, ...])`
+  feeds a `ConversationLoop` with a pre-written user side.
+
+### Hello agent — the 10-line version
+
+```python
+import json
+import oharness
+
+
+class HelloLlm:
+    def complete(self, req_json: str) -> str:
+        return json.dumps({
+            "id": "m", "model": "hello",
+            "content": [{"type": "text", "text": "Hi!"}],
+            "stop_reason": {"kind": "end_turn"},
+            "usage": {"tokens_input": 1, "tokens_output": 2},
+        })
+
+
+agent = (oharness.Agent.builder()
+    .with_llm(oharness.PyLlm(HelloLlm()))
+    .with_tools(oharness.FsToolSet())
+    .with_loop(oharness.ReactLoop())
+    .build())
+outcome = json.loads(agent.run(oharness.Task("say hello")))
+print(outcome["termination"])
+```
+
+## Examples
+
+`crates/oharness-py/examples/` ships 10 runnable examples + 1
+stub, mirroring the 11 Rust examples in
+`crates/oharness-loop/examples/`. All use scripted LLMs so they
+run without API keys. Build + run via `just python-examples`
+(requires a `.venv` at `crates/oharness-py/.venv/` — see the
+recipe for bootstrap).
+
+| Example                          | Covers                                                |
+|----------------------------------|-------------------------------------------------------|
+| `hello_scripted.py`              | Minimum viable agent (one turn, no tools)             |
+| `react_with_tools.py`            | Multi-turn ReAct with real `FsToolSet` dispatch       |
+| `custom_critic.py`               | Implement `Critic` from scratch; `reject` verdict     |
+| `self_refine.py`                 | Stub — `CriticVerdict::Revise` not exposed from Python|
+| `llm_judge_critic.py`            | Shipped `LlmJudgeCritic` + SCORE-based threshold      |
+| `budget_enforcement.py`          | `BudgetMiddleware` + tight token cap                  |
+| `custom_middleware.py`           | `PyRequestLayer` + `PyResponseLayer` via `LayeredLlm` |
+| `custom_memory_policy.py`        | Implement `MemoryPolicy` from scratch (keep-last-N)   |
+| `replay_trajectory.py`           | Record JSONL → `ReplayLlm` round-trip                 |
+| `reflexion_run.py`               | `run_reflexion` + `ReflectionInjector` over episodes  |
+| `multi_agent_conversation.py`    | `ConversationLoop` + `ScriptedUserSimulator`          |
 
 ## What's next
 
