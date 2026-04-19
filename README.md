@@ -24,8 +24,9 @@ that library.
 | Conversation loops       | ✅ `ConversationLoop` + scripted / LLM-driven user simulators          |
 | Replay                   | ✅ `ReplayLlm` (positional + strict modes, drift policies)             |
 | Benchmarks               | ✅ `Benchmark` trait + `oharness-bench-swe` adapter                    |
-| Python bindings          | ✅ `oharness` wheel via `maturin` — 9 of 10 plan §14.2 traits live     |
-| Examples                 | ✅ 11 runnable examples in `oharness-loop/examples/` (target: 15)      |
+| Python bindings          | ✅ `oharness` wheel (maturin) — adapter + orchestration surface complete |
+| Rust examples            | ✅ 11 runnable in `crates/oharness-loop/examples/` (plan §18.3 gate)   |
+| Python examples          | ✅ 10 runnable + 1 deferred stub in `python-examples/`                 |
 | Docs                     | 🟡 Front-door complete; per-subsystem docs in progress                 |
 
 Full milestone plan: [`docs/remaining-work.md`](docs/remaining-work.md).
@@ -83,6 +84,10 @@ oharness-eval       Benchmark trait + run_benchmark driver
 oharness-bench-swe  SWE-bench (lite + full) adapter
 oharness-py         Python bindings (maturin; ships to PyPI as `oharness`)
 ```
+
+A separate Python project at [`python-examples/`](python-examples/)
+imports `oharness` as a library and ships 11 runnable examples
+that mirror the Rust ones one-for-one.
 
 Dependency DAG is one-way top-to-bottom — plan §3.1.
 

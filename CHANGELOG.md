@@ -10,6 +10,44 @@ Event-schema changes are tracked separately in [CHANGELOG-schema.md](./CHANGELOG
 
 ## [Unreleased]
 
+### Changed
+- **Python examples moved to a top-level project**
+  (`python-examples/`). Previously the 11 example `.py` files
+  lived at `crates/oharness-py/examples/` — nested inside the
+  pyo3 crate alongside Rust source. That framing made them feel
+  like internal dev scripts of a Rust crate. The new layout is
+  a **vanilla Python project** with its own `pyproject.toml`
+  and `README.md`, importing `oharness` as a library the way a
+  real Python consumer would.
+  - **`python-examples/pyproject.toml`** declares
+    `oharness-examples` as a project depending on `oharness`.
+    The `[tool.uv.sources]` entry points at the local
+    `crates/oharness-py` path so `uv sync` builds + installs
+    the wheel via maturin automatically. Once `oharness` ships
+    to PyPI (post-v1.0), the `tool.uv.sources` block comes out
+    and consumers install from the index.
+  - **`crates/oharness-py/pyproject.toml`** now exists
+    alongside `Cargo.toml` — PEP 621 metadata + maturin build
+    backend, the standard pyo3 layout. Needed so downstream
+    projects (and the examples) can resolve `oharness` as a
+    regular Python distribution.
+  - **Smoke-run recipe rewrite** — `just python-examples` now
+    runs `uv sync` in `python-examples/` (which invokes maturin
+    transparently via the path dependency) then
+    `uv run python <example>.py` for each of the 11. No more
+    manual venv bootstrap, no more `maturin develop` wrangling.
+    First run is ~10s (warm cargo cache) or ~60s (cold); reruns
+    are near-instant.
+  - **Docs**: new `python-examples/README.md` documents the
+    vanilla Python workflow (uv sync + uv run, or plain
+    `pip install -e ../crates/oharness-py`). `oharness-py/README.md`
+    points at the new location. Top-level `README.md` status
+    table splits "Rust examples" from "Python examples".
+  - **`.gitignore`**: `python-examples/.venv` and
+    `python-examples/.python-version` are per-machine and
+    ignored; `python-examples/uv.lock` IS committed (standard
+    practice for reproducibility).
+
 ### Added
 - **M3 part 5: `oharness-py` orchestration surface + 10 Python
   examples.** Closes the plan §14 v1 gate — Python users can now

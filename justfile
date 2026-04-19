@@ -79,28 +79,29 @@ python-check:
     cd crates/oharness-py && cargo check
     cd crates/oharness-py && cargo clippy --all-targets -- -D warnings
 
-# Build the `oharness` wheel with maturin and smoke-run every
-# Python example. Opt-in — assumes `maturin` is installed and a
-# `.venv` sits at `crates/oharness-py/.venv/`. If missing,
-# bootstrap with:
+# Build the `oharness` wheel and smoke-run every Python example.
+# Opt-in — requires `uv` (https://docs.astral.sh/uv/). The
+# examples live in their own vanilla Python project at
+# `python-examples/`, depending on `oharness` via a local path
+# `[tool.uv.sources]` entry. First `uv sync` call bootstraps
+# everything: creates `.venv`, builds the Rust wheel via
+# maturin, installs `oharness` as editable. Subsequent runs just
+# rebuild if the Rust source changed.
 #
-#     cd crates/oharness-py
-#     uv venv .venv --python 3.13
-#     .venv/bin/python -m ensurepip --upgrade
-#     .venv/bin/python -m pip install maturin
-#
-# Then `just python-examples` builds + runs the 10 runnable
-# examples. `self_refine.py` is a deferred stub (the Revise
-# verdict isn't exposed from Python); it's built but not run.
+# `self_refine.py` is a documented stub — the Revise verdict
+# isn't exposed from Python in v1, so the example prints its
+# docstring and exits. Included in the smoke set so the stub
+# stays discoverable.
 python-examples:
-    cd crates/oharness-py && .venv/bin/python -m maturin develop --release
-    cd crates/oharness-py && .venv/bin/python examples/hello_scripted.py
-    cd crates/oharness-py && .venv/bin/python examples/react_with_tools.py
-    cd crates/oharness-py && .venv/bin/python examples/custom_critic.py
-    cd crates/oharness-py && .venv/bin/python examples/budget_enforcement.py
-    cd crates/oharness-py && .venv/bin/python examples/replay_trajectory.py
-    cd crates/oharness-py && .venv/bin/python examples/custom_memory_policy.py
-    cd crates/oharness-py && .venv/bin/python examples/llm_judge_critic.py
-    cd crates/oharness-py && .venv/bin/python examples/custom_middleware.py
-    cd crates/oharness-py && .venv/bin/python examples/reflexion_run.py
-    cd crates/oharness-py && .venv/bin/python examples/multi_agent_conversation.py
+    cd python-examples && uv sync
+    cd python-examples && uv run python hello_scripted.py
+    cd python-examples && uv run python react_with_tools.py
+    cd python-examples && uv run python custom_critic.py
+    cd python-examples && uv run python budget_enforcement.py
+    cd python-examples && uv run python replay_trajectory.py
+    cd python-examples && uv run python custom_memory_policy.py
+    cd python-examples && uv run python llm_judge_critic.py
+    cd python-examples && uv run python custom_middleware.py
+    cd python-examples && uv run python reflexion_run.py
+    cd python-examples && uv run python multi_agent_conversation.py
+    cd python-examples && uv run python self_refine.py

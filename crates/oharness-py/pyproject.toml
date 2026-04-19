@@ -1,0 +1,50 @@
+# PEP 621 metadata + maturin build backend for the `oharness`
+# Python package. The Rust crate in `Cargo.toml` is named
+# `oharness-py`; the Python distribution / import name is
+# `oharness` (per plan §1). Both coexist in this directory —
+# cargo reads `Cargo.toml`, pip / uv / maturin read this file.
+
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "oharness"
+version = "0.1.0"
+description = "Python bindings for open-harness"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT OR Apache-2.0" }
+authors = [{ name = "open-harness contributors" }]
+keywords = ["llm", "agent", "framework", "research"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Rust",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/aishfenton/open-harness"
+Repository = "https://github.com/aishfenton/open-harness"
+Issues = "https://github.com/aishfenton/open-harness/issues"
+
+[tool.maturin]
+# The Python module name — `import oharness` after install.
+# Matches `[lib].name = "oharness"` in `Cargo.toml`.
+module-name = "oharness"
+# abi3-py310 ⇒ one wheel works for every Python 3.10+ interpreter.
+features = ["pyo3/extension-module"]

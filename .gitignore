@@ -2,9 +2,11 @@
 # `oharness-py` builds outside the workspace, so it has its own
 # sibling `target/` that the root-level `/target` rule doesn't cover.
 crates/oharness-py/target
-# Local virtualenv used by `just python-examples` and contributors
-# iterating on the Python bindings. Not part of the repo.
-crates/oharness-py/.venv
+# The `python-examples/` project creates its own `.venv` on the
+# first `uv sync`. `uv.lock` IS committed (standard practice for
+# reproducibility); `.venv` and `.python-version` are per-machine.
+python-examples/.venv
+python-examples/.python-version
 Cargo.lock
 *.swp
 .DS_Store

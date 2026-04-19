@@ -26,17 +26,36 @@ land in a later milestone.
 ## Build
 
 The crate lives outside the Cargo workspace (path deps still resolve)
-so a CI runner without Python headers doesn't block on it. Build with
-[maturin](https://www.maturin.rs):
+so a CI runner without Python headers doesn't block on it.
+
+### If you just want to use the examples
+
+Don't build directly — let the
+[`python-examples/`](../../python-examples/) project pull it in
+for you:
+
+```bash
+cd python-examples
+uv sync
+```
+
+That invokes [maturin](https://www.maturin.rs) under the hood
+via the `[tool.uv.sources]` entry in `python-examples/pyproject.toml`.
+
+### If you're iterating on the bindings
+
+Install maturin yourself and use its `develop` command against
+any venv you have around:
 
 ```bash
 cd crates/oharness-py
-pipx install maturin  # or `uv tool install maturin`, etc.
-maturin develop --release
+pipx install maturin  # or `uv tool install maturin`
+maturin develop --release --manifest-path Cargo.toml
 ```
 
-This produces an importable Python package named `oharness` in the
-current Python environment.
+This produces an importable Python package named `oharness` in
+the active Python environment. A `pyproject.toml` sits alongside
+`Cargo.toml` so `pip install -e .` also works.
 
 ### Checking from Rust only
 
@@ -456,26 +475,26 @@ print(outcome["termination"])
 
 ## Examples
 
-`crates/oharness-py/examples/` ships 10 runnable examples + 1
-stub, mirroring the 11 Rust examples in
-`crates/oharness-loop/examples/`. All use scripted LLMs so they
-run without API keys. Build + run via `just python-examples`
-(requires a `.venv` at `crates/oharness-py/.venv/` — see the
-recipe for bootstrap).
+Runnable Python examples live in [`python-examples/`](../../python-examples/)
+at the repo root — **a separate, vanilla Python project** that
+imports `oharness` as a library. That layout (rather than bundling
+the examples inside this crate) is intentional: when a Python
+user reads the examples, they should look like what they'd write
+in their own project, not like internal dev scripts of a Rust
+crate.
 
-| Example                          | Covers                                                |
-|----------------------------------|-------------------------------------------------------|
-| `hello_scripted.py`              | Minimum viable agent (one turn, no tools)             |
-| `react_with_tools.py`            | Multi-turn ReAct with real `FsToolSet` dispatch       |
-| `custom_critic.py`               | Implement `Critic` from scratch; `reject` verdict     |
-| `self_refine.py`                 | Stub — `CriticVerdict::Revise` not exposed from Python|
-| `llm_judge_critic.py`            | Shipped `LlmJudgeCritic` + SCORE-based threshold      |
-| `budget_enforcement.py`          | `BudgetMiddleware` + tight token cap                  |
-| `custom_middleware.py`           | `PyRequestLayer` + `PyResponseLayer` via `LayeredLlm` |
-| `custom_memory_policy.py`        | Implement `MemoryPolicy` from scratch (keep-last-N)   |
-| `replay_trajectory.py`           | Record JSONL → `ReplayLlm` round-trip                 |
-| `reflexion_run.py`               | `run_reflexion` + `ReflectionInjector` over episodes  |
-| `multi_agent_conversation.py`    | `ConversationLoop` + `ScriptedUserSimulator`          |
+From the repo root:
+
+```bash
+cd python-examples
+uv sync                              # builds oharness + installs
+uv run python hello_scripted.py      # runs an example
+```
+
+Or smoke-run every example in one shot via `just python-examples`
+from the repo root. 10 runnable + 1 deferred stub
+(`self_refine.py` — the `Revise` verdict isn't exposed from
+Python in v1; see [`python-examples/README.md`](../../python-examples/README.md)).
 
 ## What's next
 

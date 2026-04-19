@@ -1,0 +1,30 @@
+# A vanilla Python project that consumes `oharness` as a library.
+#
+# This pyproject.toml is independent of the Rust workspace — the
+# only link is the `tool.uv.sources` entry below, which tells `uv`
+# to build the local `oharness` package from the repo's
+# `crates/oharness-py` directory via maturin rather than fetching
+# it from PyPI.
+#
+# When `oharness` ships to PyPI (post-v1.0), remove the
+# `tool.uv.sources` entry and this project installs the released
+# wheel like any other dependency.
+
+[project]
+name = "oharness-examples"
+version = "0.1.0"
+description = "Runnable Python examples for open-harness"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT OR Apache-2.0" }
+authors = [{ name = "open-harness contributors" }]
+
+dependencies = [
+    "oharness",
+]
+
+# uv-specific source override: build `oharness` from the local
+# repo path instead of PyPI. Picked up automatically by
+# `uv sync` / `uv run`.
+[tool.uv.sources]
+oharness = { path = "../crates/oharness-py" }
