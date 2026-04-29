@@ -10,6 +10,9 @@ pub mod anthropic;
 #[cfg(feature = "openai")]
 pub mod openai;
 
+#[cfg(feature = "openai-codex")]
+pub mod openai_codex;
+
 #[cfg(feature = "openai")]
 pub mod openai_compatible;
 
@@ -20,6 +23,11 @@ pub use anthropic::{AnthropicLlm, AnthropicPromptCaching};
 pub use caching::PromptCaching;
 #[cfg(feature = "openai")]
 pub use openai::OpenAiLlm;
+#[cfg(feature = "openai-codex")]
+pub use openai_codex::{
+    OpenAiCodexAuth, OpenAiCodexAuthorization, OpenAiCodexCallbackServer, OpenAiCodexCredentials,
+    OpenAiCodexLlm, OpenAiCodexOAuthClient, OpenAiCodexOAuthError,
+};
 
 #[cfg(feature = "ollama")]
 pub use openai_compatible::Ollama;

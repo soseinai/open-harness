@@ -19,6 +19,7 @@ workspace = true
 default = ["anthropic"]
 anthropic = ["reqwest"]
 openai = ["reqwest"]
+openai-codex = ["reqwest", "sha2", "uuid"]
 # OpenAI-compatible deployments. Each pulls in the core `openai` adapter —
 # they're thin factories over `OpenAiLlm` with different base URLs, auth,
 # and provider names.
@@ -37,6 +38,8 @@ tokio = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true, optional = true }
 tracing = { workspace = true }
+sha2 = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 wiremock = "0.6"

@@ -15,7 +15,7 @@ that library.
 | Area                     | Status                                                                 |
 |--------------------------|------------------------------------------------------------------------|
 | Core event schema (v1.0) | ✅ JSON-Schema exported, CI-checked for drift                          |
-| Providers                | ✅ Anthropic, OpenAI, OpenRouter, Ollama, vLLM                         |
+| Providers                | ✅ Anthropic, OpenAI, OpenAI Codex, OpenRouter, Ollama, vLLM           |
 | Streaming                | ✅ SSE-based chunk streams                                             |
 | Middleware               | ✅ `RequestLayer`, `ResponseLayer`, `FullLayer`, `ChunkObserver/Transformer` |
 | Budgets                  | ✅ Token, step, cost, time, composite                                   |
@@ -73,7 +73,7 @@ Each publishable crate also has its own `README.md` rendered on crates.io.
 ```
 oharness-core       pure types, event schema, context traits; serde only
 oharness-llm        Llm trait + middleware helper traits
-oharness-providers  Anthropic / OpenAI / OpenRouter / Ollama / vLLM adapters
+oharness-providers  Anthropic / OpenAI / OpenAI Codex / OpenRouter / Ollama / vLLM adapters
 oharness-tools      ToolSet trait + bash + fs tool kits
 oharness-memory     Passthrough / TruncateAfterTokens / ElideToolResults
 oharness-trace      EventSink impls + FileSink + InMemorySink + ReplayLlm

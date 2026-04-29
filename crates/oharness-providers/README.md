@@ -6,13 +6,14 @@ feature-gated so you only pay for the providers you use.
 
 ## Shipped adapters
 
-| Provider  | Feature     | Default | Streaming | Notes                              |
-|-----------|-------------|---------|-----------|------------------------------------|
-| Anthropic | `anthropic` | ✅      | ✅ SSE    | `messages` endpoint                |
-| OpenAI    | `openai`    |         | ✅ SSE    | Chat Completions                   |
-| OpenRouter| `openrouter`|         | ✅ SSE    | Thin factory on top of `openai`    |
-| Ollama    | `ollama`    |         | ✅ SSE    | Local, no API key                  |
-| vLLM      | `vllm`      |         | ✅ SSE    | Self-hosted, OpenAI-compatible     |
+| Provider      | Feature         | Default | Streaming | Notes                              |
+|---------------|-----------------|---------|-----------|------------------------------------|
+| Anthropic     | `anthropic`     | ✅      | ✅ SSE    | `messages` endpoint                |
+| OpenAI        | `openai`        |         | ✅ SSE    | Chat Completions                   |
+| OpenAI Codex  | `openai-codex`  |         | ✅ SSE    | ChatGPT/Codex OAuth + Responses    |
+| OpenRouter    | `openrouter`    |         | ✅ SSE    | Thin factory on top of `openai`    |
+| Ollama        | `ollama`        |         | ✅ SSE    | Local, no API key                  |
+| vLLM          | `vllm`          |         | ✅ SSE    | Self-hosted, OpenAI-compatible     |
 
 All adapters implement the [`Llm`](https://crates.io/crates/oharness-llm)
 trait.
