@@ -17,6 +17,7 @@ use oharness_core::{
     StopReason, Task, Termination, TrajectoryHandle, TrajectoryView, TruncationLimit,
 };
 use oharness_critic::{AssessmentContext, Critic, CriticTrigger, CriticVerdict};
+use oharness_llm::complete_from_stream;
 use oharness_memory::policy::MemoryContext;
 use oharness_tools::context::ToolContext;
 use oharness_tools::toolset::ToolOutcome;
@@ -163,19 +164,20 @@ impl Loop for ReactLoop {
             req.tools = tools_specs.clone();
             req.system = self.system_prompt.clone();
 
-            let response = match ctx.llm.complete(req).await {
-                Ok(r) => r,
-                Err(e) => {
-                    termination = Some(Termination::Failed {
-                        error: RunError {
-                            category: RunErrorCategory::Llm,
-                            message: e.to_string(),
-                        },
-                        at_turn: turn_index,
-                    });
-                    break;
-                }
-            };
+            let response =
+                match complete_with_optional_streaming(ctx, req, capabilities.streaming).await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        termination = Some(Termination::Failed {
+                            error: RunError {
+                                category: RunErrorCategory::Llm,
+                                message: e.to_string(),
+                            },
+                            at_turn: turn_index,
+                        });
+                        break;
+                    }
+                };
 
             // ---- consume budget + update totals ----
             usage_totals.add_usage(&response.usage);
@@ -349,6 +351,19 @@ impl Loop for ReactLoop {
             finished_at,
             agent_state: MetadataMap::new(),
         })
+    }
+}
+
+async fn complete_with_optional_streaming(
+    ctx: &LoopContext,
+    req: CompletionRequest,
+    streaming: bool,
+) -> Result<CompletionResponse, oharness_llm::LlmError> {
+    if streaming {
+        let stream = ctx.llm.stream(req).await?;
+        complete_from_stream(stream).await
+    } else {
+        ctx.llm.complete(req).await
     }
 }
 

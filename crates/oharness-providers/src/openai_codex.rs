@@ -557,6 +557,7 @@ fn to_wire_request(model: &ModelId, req: &CompletionRequest) -> Value {
         "stream": true,
         "input": wire_input(&req.messages),
         "text": { "verbosity": "low" },
+        "reasoning": { "summary": "auto" },
         "include": ["reasoning.encrypted_content"],
         "tool_choice": "auto",
         "parallel_tool_calls": true,
@@ -739,6 +740,7 @@ fn classify_http_error(status: StatusCode, text: &str) -> LlmError {
 
 #[derive(Default)]
 struct CodexStreamState {
+    current_thinking: Option<(u32, String)>,
     current_text: Option<u32>,
     current_tool: Option<(u32, String)>,
     next_index: u32,
@@ -854,6 +856,29 @@ fn decode_frame(
                 decode_output_item_added(item, state, &mut chunks);
             }
         }
+        "response.reasoning_summary_text.delta" => {
+            if let (Some((index, accumulated)), Some(delta)) = (
+                state.current_thinking.as_mut(),
+                value.get("delta").and_then(Value::as_str),
+            ) {
+                accumulated.push_str(delta);
+                chunks.push(Chunk::ThinkingDelta {
+                    index: *index,
+                    text: delta.to_string(),
+                });
+            }
+        }
+        "response.reasoning_summary_part.done" => {
+            if let Some((index, accumulated)) = state.current_thinking.as_mut() {
+                if !accumulated.ends_with("\n\n") {
+                    accumulated.push_str("\n\n");
+                    chunks.push(Chunk::ThinkingDelta {
+                        index: *index,
+                        text: "\n\n".to_string(),
+                    });
+                }
+            }
+        }
         "response.output_text.delta" | "response.refusal.delta" => {
             if let (Some(index), Some(delta)) = (
                 state.current_text,
@@ -930,6 +955,15 @@ fn decode_frame(
 
 fn decode_output_item_added(item: &Value, state: &mut CodexStreamState, chunks: &mut Vec<Chunk>) {
     match item.get("type").and_then(Value::as_str).unwrap_or_default() {
+        "reasoning" => {
+            let index = state.next_index;
+            state.next_index += 1;
+            state.current_thinking = Some((index, String::new()));
+            chunks.push(Chunk::BlockStart {
+                index,
+                start: BlockStartKind::Thinking,
+            });
+        }
         "message" => {
             let index = state.next_index;
             state.next_index += 1;
@@ -977,6 +1011,32 @@ fn decode_output_item_added(item: &Value, state: &mut CodexStreamState, chunks: 
 
 fn decode_output_item_done(item: &Value, state: &mut CodexStreamState, chunks: &mut Vec<Chunk>) {
     match item.get("type").and_then(Value::as_str).unwrap_or_default() {
+        "reasoning" => {
+            if let Some((index, accumulated)) = state.current_thinking.take() {
+                let summary = item
+                    .get("summary")
+                    .and_then(Value::as_array)
+                    .map(|parts| {
+                        parts
+                            .iter()
+                            .filter_map(|part| part.get("text").and_then(Value::as_str))
+                            .collect::<Vec<_>>()
+                            .join("\n\n")
+                    })
+                    .unwrap_or_default();
+                if !summary.is_empty() {
+                    if let Some(delta) = summary.strip_prefix(&accumulated) {
+                        if !delta.is_empty() {
+                            chunks.push(Chunk::ThinkingDelta {
+                                index,
+                                text: delta.to_string(),
+                            });
+                        }
+                    }
+                }
+                chunks.push(Chunk::BlockStop { index });
+            }
+        }
         "message" => {
             if let Some(index) = state.current_text.take() {
                 chunks.push(Chunk::BlockStop { index });
@@ -1105,5 +1165,43 @@ mod tests {
             chunks.get(1),
             Some(Chunk::ToolUseDelta { partial_json, .. }) if partial_json == "{\"clause_id\""
         ));
+    }
+
+    #[test]
+    fn decode_reasoning_summary_streams_thinking() {
+        let mut state = CodexStreamState::default();
+        let model = ModelId::new("gpt-5.2-codex");
+        let chunks = decode_frame(
+            br#"data: {"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1","summary":[]}}"#,
+            &mut state,
+            &model,
+        )
+        .unwrap();
+        assert!(matches!(
+            chunks.get(1),
+            Some(Chunk::BlockStart {
+                start: BlockStartKind::Thinking,
+                ..
+            })
+        ));
+
+        let chunks = decode_frame(
+            br#"data: {"type":"response.reasoning_summary_text.delta","delta":"Reading source"}"#,
+            &mut state,
+            &model,
+        )
+        .unwrap();
+        assert!(matches!(
+            chunks.get(1),
+            Some(Chunk::ThinkingDelta { text, .. }) if text == "Reading source"
+        ));
+
+        let chunks = decode_frame(
+            br#"data: {"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Reading source"}]}}"#,
+            &mut state,
+            &model,
+        )
+        .unwrap();
+        assert!(matches!(chunks.last(), Some(Chunk::BlockStop { .. })));
     }
 }

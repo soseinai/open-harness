@@ -31,15 +31,16 @@
 //! and `ToolTracer` (see [`TOOL_USE_ID_KEY`] below).
 
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 use oharness_core::event::{
     EventKind, LlmFailedPayload, LlmRequestPayload, LlmResponsePayload, ToolCallFailedPayload,
     ToolCallFinishedPayload, ToolCallStartedPayload,
 };
 use oharness_core::{
-    CompletionRequest, CompletionResponse, Content, LlmCapabilities, ScopedEmitter, ToolSpec,
+    CompletionRequest, CompletionResponse, Content, LlmCapabilities, ModelId, ScopedEmitter,
+    StopReason, ToolSpec, Usage,
 };
-use oharness_llm::{Chunk, ChunkObserver, ChunkStream, Llm, LlmError};
+use oharness_llm::{BlockStartKind, Chunk, ChunkObserver, ChunkStream, Llm, LlmError};
 use oharness_tools::context::ToolContext;
 use oharness_tools::toolset::{ToolOutcome, ToolSet};
 use serde_json::{json, Value};
@@ -124,7 +125,7 @@ impl Llm for RequestTracer {
 
     async fn stream(&self, req: CompletionRequest) -> Result<ChunkStream, LlmError> {
         let span = self.next_span();
-        self.emitter.emit(
+        let req_seq = self.emitter.emit(
             span.as_str(),
             EventKind::LlmRequest(LlmRequestPayload {
                 request: req.clone(),
@@ -141,19 +142,28 @@ impl Llm for RequestTracer {
                     EventKind::LlmFailed(LlmFailedPayload {
                         reason: e.to_string(),
                     }),
-                    None,
+                    Some(req_seq),
                 );
                 return Err(e);
             }
         };
 
-        let emitter = self.emitter.clone();
-        let span_owned = span;
-        let mapped = upstream.map(move |item| {
-            if let Ok(chunk) = &item {
-                emit_stream_chunk(&emitter, span_owned.as_str(), chunk);
+        let state = StreamTraceState::new(self.emitter.clone(), span, req_seq);
+        let mapped = stream::unfold((upstream, state), |(mut upstream, mut state)| async move {
+            match upstream.next().await {
+                Some(Ok(chunk)) => {
+                    state.on_chunk(&chunk);
+                    Some((Ok(chunk), (upstream, state)))
+                }
+                Some(Err(e)) => {
+                    state.on_error(&e);
+                    Some((Err(e), (upstream, state)))
+                }
+                None => {
+                    state.on_end();
+                    None
+                }
             }
-            item
         });
         Ok(mapped.boxed())
     }
@@ -165,6 +175,149 @@ fn emit_stream_chunk(emitter: &ScopedEmitter, span: &str, chunk: &Chunk) {
         Value::Null
     });
     emitter.emit(span, EventKind::LlmStreamChunk(payload), None);
+}
+
+struct StreamTraceState {
+    emitter: ScopedEmitter,
+    span: String,
+    request_seq: u64,
+    response: CompletionResponse,
+    text_blocks: Vec<(u32, String)>,
+    tool_blocks: Vec<(u32, String, String, String)>,
+    thinking_blocks: Vec<(u32, String)>,
+    closed: bool,
+}
+
+impl StreamTraceState {
+    fn new(emitter: ScopedEmitter, span: String, request_seq: u64) -> Self {
+        Self {
+            emitter,
+            span,
+            request_seq,
+            response: CompletionResponse {
+                id: String::new(),
+                model: ModelId::new(""),
+                content: Vec::new(),
+                stop_reason: StopReason::EndTurn,
+                usage: Usage::default(),
+            },
+            text_blocks: Vec::new(),
+            tool_blocks: Vec::new(),
+            thinking_blocks: Vec::new(),
+            closed: false,
+        }
+    }
+
+    fn on_chunk(&mut self, chunk: &Chunk) {
+        emit_stream_chunk(&self.emitter, self.span.as_str(), chunk);
+        match chunk {
+            Chunk::MessageStart { id, model } => {
+                self.response.id = id.clone();
+                self.response.model = model.clone();
+            }
+            Chunk::BlockStart { index, start } => match start {
+                BlockStartKind::Text => self.text_blocks.push((*index, String::new())),
+                BlockStartKind::ToolUse { name, id } => {
+                    self.tool_blocks
+                        .push((*index, id.clone(), name.clone(), String::new()));
+                }
+                BlockStartKind::Thinking => self.thinking_blocks.push((*index, String::new())),
+            },
+            Chunk::TextDelta { index, text } => {
+                if let Some(slot) = self.text_blocks.iter_mut().find(|(i, _)| i == index) {
+                    slot.1.push_str(text);
+                }
+            }
+            Chunk::ToolUseDelta {
+                index,
+                partial_json,
+            } => {
+                if let Some(slot) = self.tool_blocks.iter_mut().find(|(i, _, _, _)| i == index) {
+                    slot.3.push_str(partial_json);
+                }
+            }
+            Chunk::ThinkingDelta { index, text } => {
+                if let Some(slot) = self.thinking_blocks.iter_mut().find(|(i, _)| i == index) {
+                    slot.1.push_str(text);
+                }
+            }
+            Chunk::StopReason { reason } => {
+                self.response.stop_reason = reason.clone();
+            }
+            Chunk::Usage { usage } => {
+                self.response.usage = usage.clone();
+            }
+            Chunk::MessageStop => self.finish_response(),
+            Chunk::BlockStop { .. } | Chunk::Raw { .. } => {}
+        }
+    }
+
+    fn on_error(&mut self, error: &LlmError) {
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        self.emitter.emit(
+            self.span.as_str(),
+            EventKind::LlmFailed(LlmFailedPayload {
+                reason: error.to_string(),
+            }),
+            Some(self.request_seq),
+        );
+    }
+
+    fn on_end(&mut self) {
+        self.finish_response();
+    }
+
+    fn finish_response(&mut self) {
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        self.response.content = self.assembled_content();
+        self.emitter.emit(
+            self.span.as_str(),
+            EventKind::LlmResponse(LlmResponsePayload {
+                response: self.response.clone(),
+            }),
+            Some(self.request_seq),
+        );
+    }
+
+    fn assembled_content(&self) -> Vec<Content> {
+        let mut content: Vec<(u32, Content)> = Vec::new();
+
+        for (index, text) in &self.text_blocks {
+            content.push((*index, Content::Text { text: text.clone() }));
+        }
+        for (index, id, name, partial_json) in &self.tool_blocks {
+            let input = if partial_json.trim().is_empty() {
+                Value::Object(serde_json::Map::new())
+            } else {
+                serde_json::from_str(partial_json).unwrap_or(Value::String(partial_json.clone()))
+            };
+            content.push((
+                *index,
+                Content::ToolUse {
+                    id: id.clone(),
+                    name: name.clone(),
+                    input,
+                },
+            ));
+        }
+        for (index, thinking) in &self.thinking_blocks {
+            content.push((
+                *index,
+                Content::Thinking {
+                    thinking: thinking.clone(),
+                },
+            ));
+        }
+
+        content.sort_by_key(|(index, _)| *index);
+        content.into_iter().map(|(_, content)| content).collect()
+    }
 }
 
 // ======================================================================
@@ -430,7 +583,18 @@ mod tests {
                 "llm.stream.chunk",
                 "llm.stream.chunk",
                 "llm.stream.chunk",
+                "llm.response",
             ]
+        );
+        assert_eq!(events.last().unwrap().parent, Some(events[0].seq));
+        let EventKind::LlmResponse(LlmResponsePayload { response }) = &events.last().unwrap().kind
+        else {
+            panic!("last event must be llm.response");
+        };
+        assert!(
+            matches!(response.content.as_slice(), [Content::Text { text }] if text == "hi"),
+            "unexpected response content: {:?}",
+            response.content
         );
     }
 
