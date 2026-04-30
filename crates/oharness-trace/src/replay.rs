@@ -614,13 +614,11 @@ mod tests {
                 }),
             ),
         ];
-        let mut seq = 2;
-        for chunk in &chunks {
+        for (seq, chunk) in (2..).zip(chunks.iter()) {
             events.push(mk_event(
                 seq,
                 EventKind::LlmStreamChunk(serde_json::to_value(chunk).unwrap()),
             ));
-            seq += 1;
         }
         events
     }
