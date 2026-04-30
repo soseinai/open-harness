@@ -15,7 +15,6 @@ jobs:
   publish:
     name: Publish workspace crates
     runs-on: ubuntu-latest
-    environment: crates-io
     permissions:
       contents: read
     env:
