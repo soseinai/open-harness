@@ -697,10 +697,7 @@ fn chunk_stream_from_response(resp: reqwest::Response) -> ChunkStream {
 
         loop {
             // Drain all complete frames currently in the buffer.
-            loop {
-                let Some(frame) = extract_sse_frame(&mut buffer) else {
-                    break;
-                };
+            while let Some(frame) = extract_sse_frame(&mut buffer) {
                 match decode_frame(&frame, &mut decoder) {
                     Ok(chunks) => {
                         for c in chunks {
