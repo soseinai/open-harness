@@ -1,0 +1,170 @@
+name: Release
+
+# This workflow has two trigger paths that together form one logical "release"
+# operation:
+#
+#   1. workflow_dispatch (manual)  → bump-and-tag runs only
+#      You click Actions → Release → Run workflow → enter version → Run.
+#      bump-and-tag bumps Cargo.toml, commits as the bot, tags vX.Y.Z, and
+#      pushes both. Pushing the tag then triggers path 2 below.
+#
+#   2. push tags ["v*"]  → publish-crates
+#      Either fired by bump-and-tag's tag push, or by `git tag && git push`
+#      from a laptop. Publishes the 11 workspace crates to crates.io in
+#      topological order (RELEASE.md §1).
+#
+# Each release results in TWO workflow runs in the Actions tab — one
+# (workflow_dispatch) for the bump+tag, and one (push) for the publish.
+# The run-name below labels them "1/2" and "2/2" so the sequence is obvious.
+
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Release v{0} · 1/2 (bump + tag)', inputs.version) || format('Release {0} · 2/2 (publish to crates.io)', github.ref_name) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New semver (e.g. 0.2.0 or 0.2.0-rc1)'
+        required: true
+        type: string
+
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Path 1: manual trigger ───────────────────────────────────────────
+  # Bumps the workspace version, commits to main as the bot, tags vX.Y.Z,
+  # and pushes both. Runs ONLY on workflow_dispatch.
+  bump-and-tag:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version format
+        run: |
+          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.-]+)?$'; then
+            echo "Error: version must be semver format (e.g. 0.2.0 or 0.2.0-rc1)"
+            echo "Got: ${{ inputs.version }}"
+            exit 1
+          fi
+
+      # Mint an installation token from the sosein-release-bot GitHub App.
+      # This bot is in the main-protection ruleset's bypass list (where one
+      # is configured), so it can push the bump commit directly even when
+      # humans must use PRs.
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: soseinai
+          repositories: open-harness
+
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify tag does not already exist
+        run: |
+          if git ls-remote --tags origin "v${{ inputs.version }}" | grep -q .; then
+            echo "Error: tag v${{ inputs.version }} already exists on origin"
+            exit 1
+          fi
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit --locked
+
+      - name: Bump workspace version
+        run: cargo set-version --workspace ${{ inputs.version }}
+
+      - name: Show diff
+        run: git diff --stat && git diff
+
+      - name: Commit, tag, and push
+        run: |
+          git config user.name "sosein-release-bot[bot]"
+          git config user.email "3199403+sosein-release-bot[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "Release v${{ inputs.version }}"
+          git tag "v${{ inputs.version }}"
+          git push origin main
+          git push origin "v${{ inputs.version }}"
+
+      - name: Summary
+        run: |
+          echo "## Release v${{ inputs.version }} prepared :rocket:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version bumped to \`${{ inputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tag \`v${{ inputs.version }}\` pushed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- The tag push has now triggered a separate run of this same workflow" >> "$GITHUB_STEP_SUMMARY"
+          echo "  which will publish to crates.io." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Watch the next run: https://github.com/${{ github.repository }}/actions/workflows/release.yml" >> "$GITHUB_STEP_SUMMARY"
+
+  # ── Path 2: tag push ─────────────────────────────────────────────────
+  # Publishes all workspace crates in topological dependency order. Runs
+  # ONLY when a tag matching v* is pushed (either by bump-and-tag above,
+  # or by `git tag && git push` from the command line).
+  publish-crates:
+    if: startsWith(github.ref, 'refs/tags/v')
+    name: Publish workspace crates to crates.io
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      # Seconds to wait after each publish for the crates.io index to
+      # propagate before the next dependent crate is published. See
+      # RELEASE.md §1.
+      PROPAGATION_SLEEP: "45"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify tag matches workspace version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          ws_version=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "Tag version:       $tag"
+          echo "Workspace version: $ws_version"
+          if [[ "$tag" != "$ws_version" ]]; then
+            echo "::error::Tag v$tag does not match workspace version $ws_version"
+            exit 1
+          fi
+
+      - name: Publish crates in topological order
+        run: |
+          set -euo pipefail
+
+          crates=(
+            oharness-core
+            oharness-llm
+            oharness-tools
+            oharness-memory
+            oharness-trace
+            oharness-budget
+            oharness-critic
+            oharness-providers
+            oharness-loop
+            oharness-eval
+            oharness-bench-swe
+          )
+
+          for crate in "${crates[@]}"; do
+            echo "::group::cargo publish -p $crate"
+            cargo publish -p "$crate"
+            echo "::endgroup::"
+
+            if [[ "$crate" != "${crates[-1]}" ]]; then
+              echo "Sleeping ${PROPAGATION_SLEEP}s for crates.io index to propagate..."
+              sleep "${PROPAGATION_SLEEP}"
+            fi
+          done
